@@ -392,6 +392,131 @@ def _run_dao_candidates(sci_path, hint_ra, hint_dec, psf_fwhm_arcsec,
         return []
 
 
+def find_sn_via_multiband_dao_v19(src, host_ra, host_dec,
+                                  search_arcsec=2.5,
+                                  dao_threshold_sigma=3.0,
+                                  anchor_sigma=5.0,
+                                  min_n_above_3sig=2,
+                                  dedupe_arcsec=0.15,
+                                  psf_sharp_min=0.30, psf_sharp_max=1.50,
+                                  psf_rnd1_max_abs=0.40):
+    """v19: PSF-first multi-band SN detector.
+
+    Architecture (PSF morphology is the GATEKEEPER, not a tiebreaker):
+
+      1. Multi-band DAO at LOW threshold (3σ) -> all candidates including faint
+      2. Dedupe across bands (same object within 0.15")
+      3. PSF FILTER (FIRST):
+             For each candidate, use DAO sharp/rnd1 from its highest-peak band.
+             Reject if not in psf_sharp_(min,max) or |rnd1| > psf_rnd1_max_abs.
+             → drops extended hosts AND cosmic rays before any S/N work
+      4. Multi-band aperture S/N on PSF survivors
+      5. Apply criterion (user-defined):
+             multi-band:  max_snr >= 5σ  AND  >=2 bands >= 3σ
+             HST single:  F814W >= 5σ
+      6. Pick brightest real SN candidate by max_snr
+
+    The 3σ DAO threshold + PSF gate ensures we don't lose faint SN.  The
+    PSF gate ensures we don't pick extended galaxies regardless of how
+    bright they are.  Multi-band criterion confirms astrophysical reality.
+    """
+    telescope = src.get("telescope", "JWST").strip().upper()
+    dao_set    = MULTIBAND_DAO.get(telescope)
+    verify_set = VERIFY_BANDS.get(telescope)
+    if dao_set is None or verify_set is None:
+        return _dao_fail(host_ra, host_dec)
+    is_single_band = (len(verify_set) == 1)
+    req_n_3sig = 1 if is_single_band else min_n_above_3sig
+
+    # ── Step 1: multi-band DAO at LOW threshold ──
+    all_cands = []
+    for band, path_fn, fwhm_arc, kind in dao_set:
+        sci_path = path_fn(src)
+        if sci_path is None or not Path(sci_path).exists(): continue
+        cands = _run_dao_candidates(sci_path, host_ra, host_dec, fwhm_arc,
+                                    search_arcsec, dao_threshold_sigma)
+        for c in cands:
+            c["band"] = band
+            all_cands.append(c)
+    if not all_cands:
+        return _dao_fail(host_ra, host_dec)
+
+    # ── Step 2: dedupe across bands ──
+    unique = []
+    for c in all_cands:
+        merged = False
+        for u_entry in unique:
+            sep = SkyCoord(c["ra"], c["dec"], unit="deg").separation(
+                  SkyCoord(u_entry["ra"], u_entry["dec"], unit="deg")
+                  ).to(u.arcsec).value
+            if sep < dedupe_arcsec:
+                u_entry["detections"].append(c)
+                merged = True
+                break
+        if not merged:
+            unique.append(dict(ra=c["ra"], dec=c["dec"], detections=[c]))
+
+    # ── Step 3: PSF FILTER (THE GATEKEEPER, applied BEFORE S/N) ──
+    # Rule: a candidate is a real point source only if EVERY DAO band where
+    # it was detected passes the PSF morphology check.  This catches galaxies
+    # that look compact in one band (e.g., red bulge in F277W) but extended
+    # in another (e.g., F115W).
+    psf_candidates = []
+    for u_entry in unique:
+        all_pass = True
+        for d in u_entry["detections"]:
+            sharp_ok = psf_sharp_min < d["sharp"] < psf_sharp_max
+            rnd_ok   = abs(d["rnd1"]) < psf_rnd1_max_abs
+            if not (sharp_ok and rnd_ok):
+                all_pass = False
+                break
+        if all_pass:
+            best_dao = max(u_entry["detections"], key=lambda d: d["peak"])
+            u_entry["best_dao"]  = best_dao
+            u_entry["best_peak"] = best_dao["peak"]
+            psf_candidates.append(u_entry)
+    if not psf_candidates:
+        return _dao_fail(host_ra, host_dec, n=len(unique))
+
+    # ── Step 4: multi-band aperture S/N (only on PSF survivors) ──
+    for u_entry in psf_candidates:
+        snrs = {}
+        for band, path_fn, kind in verify_set:
+            sp = path_fn(src)
+            if sp is None or not Path(sp).exists(): continue
+            mag, snr = aper_photometry(sp, None, kind, u_entry["ra"], u_entry["dec"])
+            snrs[band] = float(snr) if snr else 0.0
+        u_entry["snrs"]    = snrs
+        u_entry["max_snr"] = max(snrs.values()) if snrs else 0.0
+        u_entry["n_3sig"]  = sum(1 for s in snrs.values() if s >= 3.0)
+
+    # ── Step 5: apply criterion (1×anchor + (n-1)×3σ) ──
+    real_sn = [u_entry for u_entry in psf_candidates
+               if u_entry["max_snr"] >= anchor_sigma
+                  and u_entry["n_3sig"] >= req_n_3sig]
+    if not real_sn:
+        return _dao_fail(host_ra, host_dec, n=len(psf_candidates))
+
+    # ── Step 6: pick brightest by MAX DAO PEAK (compact-source brightness) ──
+    # CRITICAL: not by aperture max_snr.  Aperture S/N favours extended
+    # sources (high pixel sum); DAO peak favours compact PSF-like sources
+    # (the convolution response peaks for matched-PSF objects).  For SN
+    # selection among PSF survivors, DAO peak is the correct metric.
+    real_sn.sort(key=lambda u_entry: u_entry["best_peak"], reverse=True)
+    best = real_sn[0]
+    moved = float(SkyCoord(host_ra, host_dec, unit="deg").separation(
+                  SkyCoord(best["ra"], best["dec"], unit="deg")).to(u.arcsec).value)
+    return dict(success=True,
+                sn_ra=best["ra"], sn_dec=best["dec"],
+                n_candidates=len(real_sn),
+                peak=best["best_peak"],
+                max_snr=best["max_snr"],
+                n_3sig=best["n_3sig"],
+                moved_arcsec=moved,
+                sharp=best["best_dao"]["sharp"],
+                rnd1=best["best_dao"]["rnd1"])
+
+
 def find_sn_via_multiband_dao(src, host_ra, host_dec,
                               search_arcsec=2.5, threshold_sigma=5.0,
                               max_snr_req=5.0, n_3sig_req=3,
@@ -865,37 +990,30 @@ def main():
         print(f"\n==== ID={src['id']} seq={seqn} ====", flush=True)
         # --- Optional DAO point-source refinement (BEFORE pos/cut) ---
         if args.find_sn:
-            # v18: REVERT TO v15 single-band DAO for selection.
-            # The multi-band DAO attempt (v17) added candidates that broke
-            # v15's structural heuristic for known-correct cases.
-            # Multi-band info is captured as a per-CSV-row QUALITY FLAG only
-            # (computed below from the per-band photometry that's already done).
+            # v19: PSF-first multi-band detector.
+            # See find_sn_via_multiband_dao_v19 for the algorithm.
             tel = src.get("telescope", "JWST").strip().upper()
-            entry = DETECT_BAND.get(tel)
-            if entry is None:
-                print(f"  DAO: no detection band defined for telescope={tel}; "
-                      f"keeping hint", flush=True)
-            else:
-                fwhm_arcsec, path_fn = entry
-                det_path = path_fn(src)
-                if det_path is None or not Path(det_path).exists():
-                    print(f"  DAO: detection file missing; keeping hint",
-                          flush=True)
-                else:
-                    r = find_sn_via_dao(det_path, src["sn_ra"], src["sn_dec"],
-                                        psf_fwhm_arcsec=fwhm_arcsec,
-                                        search_arcsec=args.search_arcsec,
-                                        threshold_sigma=args.threshold_sigma,
-                                        host_ra=src.get("host_ra"),
-                                        host_dec=src.get("host_dec"))
-                    flag = "OK " if r["success"] else "no compact source"
-                    print(f"  DAO ({tel}, fwhm={fwhm_arcsec}\"): {flag}  "
-                          f"moved={r['moved_arcsec']:.2f}\"  "
-                          f"candidates={r['n_candidates']}  "
-                          f"peak={r['peak']:.4g}", flush=True)
-                    if r["success"]:
-                        src["sn_ra"]  = r["sn_ra"]
-                        src["sn_dec"] = r["sn_dec"]
+            host_ra_s  = src.get("host_ra",  src["sn_ra"])
+            host_dec_s = src.get("host_dec", src["sn_dec"])
+            r = find_sn_via_multiband_dao_v19(
+                src, host_ra_s, host_dec_s,
+                search_arcsec=args.search_arcsec,
+                dao_threshold_sigma=3.0,    # LOW threshold to catch faint SN
+                anchor_sigma=5.0,           # at least one band must hit this
+                min_n_above_3sig=2,         # at least 2 bands >= 3σ
+            )
+            flag = "OK " if r["success"] else "no PSF-like real candidate"
+            extra = ""
+            if r["success"]:
+                extra = (f"  max_snr={r.get('max_snr', 0):.1f}σ  "
+                         f"n3σ={r.get('n_3sig', 0)}  "
+                         f"sharp={r.get('sharp', 0):.2f} rnd1={r.get('rnd1', 0):+.2f}")
+            print(f"  DAO-v19 ({tel}): {flag}  "
+                  f"moved={r['moved_arcsec']:.2f}\"  "
+                  f"real_PSF_candidates={r['n_candidates']}{extra}", flush=True)
+            if r["success"]:
+                src["sn_ra"]  = r["sn_ra"]
+                src["sn_dec"] = r["sn_dec"]
         pos = SkyCoord(src["sn_ra"], src["sn_dec"], unit="deg", frame="icrs")
         print(f"  SN @ RA={src['sn_ra']:.6f} Dec={src['sn_dec']:.6f}", flush=True)
 
