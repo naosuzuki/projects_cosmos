@@ -202,12 +202,19 @@ def resolve_euclid_path(eu_tile, band):
 
 
 _FITS_CACHE = {}   # path -> open HDUList (kept open for the script's lifetime)
+_WCS_CACHE  = {}   # path -> WCS (avoids re-parsing the header per call)
 
 
 def _open_cached(path):
     if path not in _FITS_CACHE:
         _FITS_CACHE[path] = fits.open(path, memmap=True)
     return _FITS_CACHE[path]
+
+
+def _wcs_cached(path, hdu):
+    if path not in _WCS_CACHE:
+        _WCS_CACHE[path] = WCS(hdu.header)
+    return _WCS_CACHE[path]
 
 
 def aper_photometry(sci_path, err_path, kind, sn_ra, sn_dec):
@@ -226,7 +233,7 @@ def aper_photometry(sci_path, err_path, kind, sn_ra, sn_dec):
         else:
             sci_hdu = h[0]
         hdr = sci_hdu.header
-        wcs = WCS(hdr)
+        wcs = _wcs_cached(sci_path, sci_hdu)
     except Exception as e:
         print(f"      (open failed {sci_path}: {type(e).__name__}: {e})", flush=True)
         return None, 0.0
@@ -286,7 +293,7 @@ def cut(path, pos, north_up_jwst=False):
     """
     h = _open_cached(path)
     sci_hdu = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
-    wcs = WCS(sci_hdu.header)
+    wcs = _wcs_cached(path, sci_hdu)
     # copy=True forces Cutout2D to materialise the ~80KB small region only.
     c = Cutout2D(sci_hdu.data, pos, size=CUTOUT_SIZE, wcs=wcs, copy=True)
     # Cast the small cutout to float32 (cheap):
@@ -308,11 +315,32 @@ def main():
                     help="also do aperture photometry per band and write CSV")
     ap.add_argument("--csv", default="/tmp/sn_3.csv",
                     help="output CSV path when --measure is set")
+    ap.add_argument("--input-csv", default=None,
+                    help="lookup-table CSV with columns: id, telescope, sn_ra, "
+                         "sn_dec, host_ra, host_dec, hst, jwst, euclid. "
+                         "Replaces the hardcoded SOURCES list when provided.")
     args = ap.parse_args()
     crosshair = not args.no_crosshair
 
+    # Lookup-table mode: read sources from CSV (for mass production)
+    if args.input_csv:
+        with open(args.input_csv) as fh:
+            rdr = csv.DictReader(fh)
+            sources = []
+            for i, r in enumerate(rdr, 1):
+                sources.append(dict(
+                    id=int(r["id"]), seq=i,
+                    sn_ra=float(r["sn_ra"]), sn_dec=float(r["sn_dec"]),
+                    host_ra=float(r["host_ra"]), host_dec=float(r["host_dec"]),
+                    hst=r["hst"], jwst=r["jwst"], euclid=r["euclid"],
+                    telescope=r.get("telescope", "JWST").strip().upper(),
+                ))
+        print(f"Loaded {len(sources)} sources from {args.input_csv}", flush=True)
+    else:
+        sources = SOURCES
+
     phot_rows = [] if args.measure else None
-    for src in SOURCES:
+    for src in sources:
         pos = SkyCoord(src["sn_ra"], src["sn_dec"], unit="deg", frame="icrs")
         seqn = f"{src['seq']:04d}"
         print(f"\n==== ID={src['id']} seq={seqn} ====", flush=True)
