@@ -28,12 +28,47 @@ SOURCES = [
     # All centroids landed within 0.05-0.18" of the hint, confirming the
     # eyeball was a reasonable starting point; these are the data-driven
     # final positions.
-    dict(id=130972, seq=3, sn_ra=150.279695, sn_dec=2.041101,
-         hst="052", jwst="A4",  euclid="101542818"),
-    dict(id=371996, seq=4, sn_ra=150.282844, sn_dec=1.932259,
-         hst="040", jwst="A10", euclid="101542818"),
-    dict(id=471959, seq=5, sn_ra=150.278904, sn_dec=2.430962,
-         hst="076", jwst="B3",  euclid="101545698"),
+    #
+    # NB: seq=1/2/3 (not 3/4/5) so the output PNG naming
+    # sn_known34c_000{1,2,3}_*.png aligns with the polish step's
+    # row-index-as-seq convention when called with a 3-row CSV.
+    # The v05 PNGs at seq 0003/0004/0005 are preserved in v05/.
+    dict(id=130972, seq=1, sn_ra=150.279695, sn_dec=2.041101,
+         hst="052", jwst="A4",  euclid="101542818",
+         host_ra=150.279917, host_dec=2.041285),
+    dict(id=371996, seq=2, sn_ra=150.282844, sn_dec=1.932259,
+         hst="040", jwst="A10", euclid="101542818",
+         host_ra=150.282612, host_dec=1.932054),
+    dict(id=471959, seq=3, sn_ra=150.278904, sn_dec=2.430962,
+         hst="076", jwst="B3",  euclid="101545698",
+         host_ra=150.278761, host_dec=2.430970),
+]
+
+# Aperture-photometry constants (must match measure_sn_5.py)
+APER_ARCSEC      = 0.20
+HOST_RING_IN_AS  = 0.25
+HOST_RING_OUT_AS = 0.40
+
+# Band catalogue: (label, kind, sci_path_template_func, err_path_template_func)
+def _hst_paths(tile):
+    return (f"{HST_DIR}/acs_I_030mas_{tile}_sci.fits",
+            f"{HST_DIR}/acs_I_030mas_{tile}_wht.fits")
+def _eu_path(tile, band):
+    matches = sorted(glob.glob(f"{EU_DIR}/EUC_MER_BGSUB-MOSAIC-{band}_TILE{tile}-*.fits"))
+    return (matches[-1] if matches else None, None)
+def _jwst_paths(tile, band):
+    return (resolve_jwst_path(tile, band), None)
+
+BANDS_PHOT = [   # (label, kind, fn-returning(sci_path, err_path))
+    ("F814W", "hst",    lambda src: _hst_paths(src["hst"])),
+    ("VIS",   "euclid", lambda src: _eu_path(src["euclid"], "VIS")),
+    ("Y",     "euclid", lambda src: _eu_path(src["euclid"], "NIR-Y")),
+    ("J",     "euclid", lambda src: _eu_path(src["euclid"], "NIR-J")),
+    ("H",     "euclid", lambda src: _eu_path(src["euclid"], "NIR-H")),
+    ("F115W", "jwst",   lambda src: _jwst_paths(src["jwst"], "f115w")),
+    ("F150W", "jwst",   lambda src: _jwst_paths(src["jwst"], "f150w")),
+    ("F277W", "jwst",   lambda src: _jwst_paths(src["jwst"], "f277w")),
+    ("F444W", "jwst",   lambda src: _jwst_paths(src["jwst"], "f444w")),
 ]
 CUTOUT_SIZE = 6.0 * u.arcsec
 ID_TAG = "known34c"
@@ -166,6 +201,73 @@ def _open_cached(path):
     return _FITS_CACHE[path]
 
 
+def aper_photometry(sci_path, err_path, kind, sn_ra, sn_dec):
+    """Aperture photometry at (sn_ra, sn_dec).
+    Returns (mag_AB, snr).  Uses the same constants as measure_sn_5.py.
+    Re-uses _FITS_CACHE — OS page cache makes this near-free if cut()
+    has already opened the file.
+    """
+    if sci_path is None:
+        return None, 0.0
+    try:
+        h = _open_cached(sci_path)
+        hdu_names = [x.name for x in h]
+        if kind == "jwst" and "SCI" in hdu_names:
+            sci_hdu = h["SCI"]
+        else:
+            sci_hdu = h[0]
+        hdr = sci_hdu.header
+        wcs = WCS(hdr)
+    except Exception as e:
+        print(f"      (open failed {sci_path}: {type(e).__name__}: {e})", flush=True)
+        return None, 0.0
+    try:
+        pix_scale = float(np.sqrt(np.abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600.0
+    except Exception:
+        pix_scale = 0.03
+    aper_px  = APER_ARCSEC      / pix_scale
+    ring_in  = HOST_RING_IN_AS  / pix_scale
+    ring_out = HOST_RING_OUT_AS / pix_scale
+    half = int(np.ceil(max(ring_out, 2.0 / pix_scale)) + 2)
+
+    sx, sy = wcs.all_world2pix(sn_ra, sn_dec, 0)
+    sx, sy = float(sx), float(sy)
+    # Get shape from header so we never materialise the full image.
+    ny = int(hdr.get("NAXIS2", 0)); nx = int(hdr.get("NAXIS1", 0))
+    if ny == 0 or nx == 0:
+        # Fallback: read shape from the memmap (cheap, no copy)
+        ny, nx = sci_hdu.data.shape[-2:]
+    x0 = max(0, int(sx - half)); x1 = min(nx, int(sx + half + 1))
+    y0 = max(0, int(sy - half)); y1 = min(ny, int(sy + half + 1))
+    # SLICE FIRST (memory-mapped read of just the small box),
+    # THEN astype.  Same fix as cut() — avoids reading 25 GB JWST tiles.
+    sub_raw = sci_hdu.data[y0:y1, x0:x1]
+    if sub_raw.size == 0: return None, 0.0
+    sub = sub_raw.astype(np.float64)
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    rr = np.sqrt((xx - sx)**2 + (yy - sy)**2)
+    in_aper = rr <= aper_px; in_ring = (rr >= ring_in) & (rr <= ring_out)
+    n_aper = int(in_aper.sum())
+    if n_aper == 0 or in_ring.sum() == 0: return None, 0.0
+    host_sb = float(np.nanmedian(sub[in_ring]))
+    flux = float(np.nansum(sub[in_aper])) - host_sb * n_aper
+    sigma_ring = float(np.nanstd(sub[in_ring]))
+    sigma_aper = sigma_ring * np.sqrt(n_aper)
+    snr = flux / (sigma_aper + 1e-30)
+    bunit = (hdr.get("BUNIT") or "").strip()
+    if "MJy/sr" in bunit or kind == "jwst":
+        pix_sr = hdr.get("PIXAR_SR") or ((pix_scale / 206265.0) ** 2)
+        f_jy = flux * float(pix_sr) * 1.0e6
+        mag = (-2.5 * np.log10(f_jy / 3631.0)) if f_jy > 0 else None
+    elif kind == "hst":
+        zp = hdr.get("ABMAG_ZP") or hdr.get("ABMAGZP") or hdr.get("MAGZP") or 25.937
+        mag = (float(zp) - 2.5 * np.log10(flux)) if flux > 0 else None
+    else:
+        zp = hdr.get("ZP") or hdr.get("MAGZP") or hdr.get("PHOTZP") or 23.9
+        mag = (float(zp) - 2.5 * np.log10(flux)) if flux > 0 else None
+    return mag, float(snr)
+
+
 def cut(path, pos, north_up_jwst=False):
     """Cut 6'' window with two efficiency tricks:
       - Slice from memory-mapped data FIRST, then astype on the small slice
@@ -189,6 +291,18 @@ def cut(path, pos, north_up_jwst=False):
 
 
 def main():
+    import argparse, csv
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--no-crosshair", action="store_true",
+                    help="skip the simple '+' crosshair (for downstream polish)")
+    ap.add_argument("--measure", action="store_true",
+                    help="also do aperture photometry per band and write CSV")
+    ap.add_argument("--csv", default="/tmp/sn_3.csv",
+                    help="output CSV path when --measure is set")
+    args = ap.parse_args()
+    crosshair = not args.no_crosshair
+
+    phot_rows = [] if args.measure else None
     for src in SOURCES:
         pos = SkyCoord(src["sn_ra"], src["sn_dec"], unit="deg", frame="icrs")
         seqn = f"{src['seq']:04d}"
@@ -202,7 +316,8 @@ def main():
                 hst_path += ".gz"
             print(f"  HST F814W ({Path(hst_path).name}) ...", flush=True)
             c = cut(hst_path, pos)
-            render_gray(c.data, OUT_HST / f"sn_{ID_TAG}_{seqn}_hst.png")
+            render_gray(c.data, OUT_HST / f"sn_{ID_TAG}_{seqn}_hst.png",
+                        crosshair=crosshair)
         except Exception as e:
             print(f"    HST FAILED: {e}", flush=True)
 
@@ -211,7 +326,8 @@ def main():
             p = resolve_euclid_path(src["euclid"], "VIS")
             print(f"  Euclid VIS ({Path(p).name}) ...", flush=True)
             c = cut(p, pos)
-            render_gray(c.data, OUT_EUCLID / f"sn_{ID_TAG}_{seqn}_euclid_vis.png")
+            render_gray(c.data, OUT_EUCLID / f"sn_{ID_TAG}_{seqn}_euclid_vis.png",
+                        crosshair=crosshair)
         except Exception as e:
             print(f"    Euclid VIS FAILED: {e}", flush=True)
 
@@ -221,7 +337,9 @@ def main():
             cj_d = cut(resolve_euclid_path(src["euclid"], "NIR-J"), pos).data
             ch_d = cut(resolve_euclid_path(src["euclid"], "NIR-H"), pos).data
             print(f"  Euclid NISP Y/J/H ...", flush=True)
-            render_rgb_nisp(cy_d, cj_d, ch_d, OUT_EUCLID / f"sn_{ID_TAG}_{seqn}_euclid_nisp.png")
+            render_rgb_nisp(cy_d, cj_d, ch_d,
+                            OUT_EUCLID / f"sn_{ID_TAG}_{seqn}_euclid_nisp.png",
+                            crosshair=crosshair)
         except Exception as e:
             print(f"    Euclid NISP FAILED: {e}", flush=True)
 
@@ -231,12 +349,53 @@ def main():
             c150 = cut(resolve_jwst_path(src["jwst"], "f150w"), pos, north_up_jwst=True).data
             c277 = cut(resolve_jwst_path(src["jwst"], "f277w"), pos, north_up_jwst=True).data
             print(f"  JWST F115/F150/F277 (N-up) ...", flush=True)
-            render_rgb_jwst(c115, c150, c277, OUT_JWST / f"sn_{ID_TAG}_{seqn}_jwst1.png")
+            render_rgb_jwst(c115, c150, c277,
+                            OUT_JWST / f"sn_{ID_TAG}_{seqn}_jwst1.png",
+                            crosshair=crosshair)
             c444 = cut(resolve_jwst_path(src["jwst"], "f444w"), pos, north_up_jwst=True).data
             print(f"  JWST F150/F277/F444 (N-up) ...", flush=True)
-            render_rgb_jwst(c150, c277, c444, OUT_JWST / f"sn_{ID_TAG}_{seqn}_jwst2.png")
+            render_rgb_jwst(c150, c277, c444,
+                            OUT_JWST / f"sn_{ID_TAG}_{seqn}_jwst2.png",
+                            crosshair=crosshair)
         except Exception as e:
             print(f"    JWST FAILED: {e}", flush=True)
+
+        # Aperture photometry (--measure).  Re-uses the same FITS_CACHE so
+        # the per-band file is already open from the cut() calls above.
+        if args.measure:
+            row = dict(id=src["id"], telescope="HST",
+                       host_ra=src.get("host_ra", src["sn_ra"]),
+                       host_dec=src.get("host_dec", src["sn_dec"]),
+                       sn_ra=src["sn_ra"], sn_dec=src["sn_dec"])
+            best_band = "F814W"; best_snr = -999.0
+            for label, kind, paths_fn in BANDS_PHOT:
+                sci_p, err_p = paths_fn(src)
+                mag, snr = aper_photometry(sci_p, err_p, kind,
+                                           src["sn_ra"], src["sn_dec"])
+                row[f"mag_{label}"] = -1 if mag is None else round(mag, 2)
+                row[f"snr_{label}"] = round(snr, 2)
+                if snr > best_snr:
+                    best_snr = snr; best_band = label
+            row["best_band"] = best_band
+            row["best_snr"]  = round(best_snr, 2)
+            row["combined_sigma"] = round(best_snr, 2)  # for HST SN, dominated by F814W
+            phot_rows.append(row)
+            print(f"  photometry: best={best_band}@{best_snr:.1f}σ", flush=True)
+
+    # Write CSV with the same column order as /tmp/sn_5.csv
+    if args.measure and phot_rows:
+        cols = ["id","telescope","host_ra","host_dec","sn_ra","sn_dec",
+                "best_band","best_snr","combined_sigma",
+                "mag_F814W","mag_VIS","mag_Y","mag_J","mag_H",
+                "mag_F115W","mag_F150W","mag_F277W","mag_F444W",
+                "snr_F814W","snr_VIS","snr_Y","snr_J","snr_H",
+                "snr_F115W","snr_F150W","snr_F277W","snr_F444W"]
+        with open(args.csv, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            for r in phot_rows:
+                w.writerow({c: r.get(c, "") for c in cols})
+        print(f"\nWrote {args.csv}  ({len(phot_rows)} rows)", flush=True)
 
     print("\nALL DONE", flush=True)
 
