@@ -247,13 +247,44 @@ def _jwst_f115w_path_fn(src):
 def _eu_nisp_h_path_fn(src):
     return _eu_path(src["euclid"], "NIR-H")[0]
 
+def _eu_nisp_y_path_fn(src):
+    return _eu_path(src["euclid"], "NIR-Y")[0]
+
+# ─────────────────────────────────────────────────────────────────────
+# Empirical PSF FWHM measurements (Gaussian fits to faint unsaturated stars).
+#
+# Measured 2026-05-26 in COSMOS tiles using stars from the Euclid MER
+# catalogue (phz_classification=1, vis_det=1, mag selection per telescope
+# to avoid saturation: mag 19-21 for HST/JWST, mag 16-18 for Euclid NISP).
+#
+#   band            measured FWHM (arcsec)   n stars   tile
+#   HST F814W            0.134 ± 0.018        8       052
+#   JWST F115W v0.8      0.057 ± 0.052       12       A4 (v0.8 sci.fits)
+#   JWST F277W v0.8      0.130 ± 0.009       11       A4 (v0.8)
+#   Euclid VIS           0.194 ± 0.006       12       101542818
+#   Euclid NIR-Y         0.524 ± 0.096       10       101542818
+#   Euclid NIR-J         0.537 ± 0.117       12       101542818
+#   Euclid NIR-H         0.567 ± 0.051       12       101542818
+#
+# These are slightly broader than the diffraction limit because the COSMOS
+# mosaics are drizzled to 30 mas (HST/JWST) / 100 mas (Euclid).
+#
+# Detection band per telescope (used by --find-sn):
+#   HST     -> F814W   (only HST band)
+#   JWST    -> F115W   (sharpest PSF + SN usually bluest/brightest there)
+#   EUCLID  -> NIR-Y   (NOT NIR-H!  In NIR-H the host is up to 27x brighter
+#                       than a typical SN — SN is not detectable as compact
+#                       source.  In NIR-Y the contrast drops to ~6x and the
+#                       SN is detectable.)
+# ─────────────────────────────────────────────────────────────────────
+
 DETECT_BAND = {
     # telescope-tag -> (psf_fwhm_arcsec, path_fn(src) -> sci_path)
-    "HST":         (0.090, _hst_path_fn),
-    "JWST":        (0.045, _jwst_f115w_path_fn),
-    "EUCLID":      (0.48,  _eu_nisp_h_path_fn),
-    "EUCLID-NISP": (0.48,  _eu_nisp_h_path_fn),
-    "NISP":        (0.48,  _eu_nisp_h_path_fn),
+    "HST":         (0.134, _hst_path_fn),
+    "JWST":        (0.057, _jwst_f115w_path_fn),
+    "EUCLID":      (0.524, _eu_nisp_y_path_fn),
+    "EUCLID-NISP": (0.524, _eu_nisp_y_path_fn),
+    "NISP":        (0.524, _eu_nisp_y_path_fn),
 }
 
 
@@ -264,7 +295,8 @@ def _dao_fail(hint_ra, hint_dec, n=0):
 
 
 def find_sn_via_dao(sci_path, hint_ra, hint_dec, psf_fwhm_arcsec=0.1,
-                    search_arcsec=2.5, threshold_sigma=5.0):
+                    search_arcsec=2.5, threshold_sigma=5.0,
+                    host_ra=None, host_dec=None, host_mask_arcsec=0.3):
     """Find SN point source near (hint_ra, hint_dec) using DAOStarFinder.
 
     Algorithm (all on a small cutout, sliced from the memory-mapped HDU):
@@ -272,17 +304,26 @@ def find_sn_via_dao(sci_path, hint_ra, hint_dec, psf_fwhm_arcsec=0.1,
       2. DAOStarFinder(fwhm=PSF_in_pixels, threshold=Nσ) -> compact sources
          (the FWHM convolution kernel suppresses extended host emission)
       3. keep only candidates within `search_arcsec` of the hint
-      4. pick the BRIGHTEST candidate (`peak` flux)
-      5. return its WCS RA/Dec (already a subpixel centroid from DAO)
+      4. v14 fix: drop any candidate within `host_mask_arcsec` of (host_ra,
+         host_dec) — the host galaxy nucleus is often a compact source DAO
+         would otherwise pick as "brightest"
+      5. pick the BRIGHTEST surviving candidate (`peak` flux)
+      6. return its WCS RA/Dec (already a subpixel centroid from DAO)
 
     File-open efficient: uses the shared _FITS_CACHE / _WCS_CACHE so the
     same FITS is opened only once per process even when cut() / aper_photometry
-    read it again later.
+    read it again later.  Host masking adds no I/O — purely numeric filter.
+
+    Args:
+        host_ra, host_dec   if provided, reject DAO candidates within
+                            host_mask_arcsec of this position
+        host_mask_arcsec    radius of the host-rejection zone (default 0.3″)
 
     Returns dict:
         success         True if a compact source was found within search_arcsec
         sn_ra, sn_dec   refined SN position (= hint if no detection)
         n_candidates    number of compact sources DAO found in the search box
+                        AFTER host masking
         peak            peak flux of the chosen source
         moved_arcsec    distance the position moved from the hint
     """
@@ -323,6 +364,19 @@ def find_sn_via_dao(sci_path, hint_ra, hint_dec, psf_fwhm_arcsec=0.1,
         if not in_search.any():
             return _dao_fail(hint_ra, hint_dec, n=len(sources))
         candidates = sources[in_search]
+        # v14: host masking — drop any DAO candidate within host_mask_arcsec
+        # of the host position.  The host nucleus is often the brightest
+        # compact source in the search box; without this filter, DAO's
+        # argmax(peak) picks it instead of the SN.
+        if host_ra is not None and host_dec is not None and host_mask_arcsec > 0:
+            hx, hy = wcs.all_world2pix(host_ra, host_dec, 0)
+            h_dx = np.asarray(candidates["xcentroid"]) - (float(hx) - x0)
+            h_dy = np.asarray(candidates["ycentroid"]) - (float(hy) - y0)
+            h_r_arcsec = np.sqrt(h_dx**2 + h_dy**2) * pix_scale
+            not_host = h_r_arcsec > host_mask_arcsec
+            if not not_host.any():
+                return _dao_fail(hint_ra, hint_dec, n=len(candidates))
+            candidates = candidates[not_host]
         best_idx = int(np.argmax(np.asarray(candidates["peak"])))
         best = candidates[best_idx]
         cx_full = float(best["xcentroid"]) + x0
@@ -577,7 +631,9 @@ def main():
                     r = find_sn_via_dao(det_path, src["sn_ra"], src["sn_dec"],
                                         psf_fwhm_arcsec=fwhm_arcsec,
                                         search_arcsec=args.search_arcsec,
-                                        threshold_sigma=args.threshold_sigma)
+                                        threshold_sigma=args.threshold_sigma,
+                                        host_ra=src.get("host_ra"),
+                                        host_dec=src.get("host_dec"))
                     flag = "OK " if r["success"] else "no compact source"
                     print(f"  DAO ({tel}, fwhm={fwhm_arcsec}\"): {flag}  "
                           f"moved={r['moved_arcsec']:.2f}\"  "
