@@ -111,10 +111,12 @@ def quadrant_arms(dx, dy):
 def overlay_crosshair(img_rgb, sn_xy, arms, color=CROSSHAIR_COLOR, style="solid"):
     h, w = img_rgb.shape[:2]
     sx, sy = sn_xy
-    # +3 px extra gap (user request 2026-05-26): keeps the SN point source
-    # visible by pushing each arm-start 3 px further from the centre.
-    inner = max(2, int(ARM_INNER * min(h, w))) + 3
-    outer = max(inner + 4, int(ARM_OUTER * min(h, w)) + 3)
+    # +7 PNG px extra gap (user request 2026-05-26 clarified):
+    # 3 HST native pixels = 3 × 0.030" = 0.09" of sky.  On the 480-px PNG
+    # of a 6" field that's 0.09 / (6/480) ≈ 7 PNG pixels — same across
+    # all 5 panel types since they all share the 480×480 / 6" rendering.
+    inner = max(2, int(ARM_INNER * min(h, w))) + 7
+    outer = max(inner + 4, int(ARM_OUTER * min(h, w)) + 7)
     thickness = max(1, min(h, w) // 240)
     pil = Image.fromarray(img_rgb).convert("RGB")
     d = ImageDraw.Draw(pil)
@@ -207,9 +209,29 @@ def repaint_labels(img_rgb, source_id, z, header, host_mag_label, host_mag,
 # ============================================================
 # Per-source helpers
 
+# Catalog caches — loaded lazily on first access, re-used across sources.
+# Without this, each source caused 2 reads of a ~hundreds-of-MB FITS.
+_MASTER_TABLE = None
+_LEPHARE_TABLE = None
+
+
+def _master_table():
+    global _MASTER_TABLE
+    if _MASTER_TABLE is None:
+        _MASTER_TABLE = Table.read(MASTER_FITS)
+    return _MASTER_TABLE
+
+
+def _lephare_table():
+    global _LEPHARE_TABLE
+    if _LEPHARE_TABLE is None:
+        _LEPHARE_TABLE = Table.read(LEPHARE_FITS)
+    return _LEPHARE_TABLE
+
+
 def host_mags_for_id(cid):
     """Return dict of host mags from the master catalog: F814W, VIS?, Y?, F115W, F150W."""
-    t = Table.read(MASTER_FITS)
+    t = _master_table()
     idx = (t["id"] == cid).nonzero()[0][0]
     row = t[idx]
     out = dict()
@@ -226,8 +248,8 @@ def host_mags_for_id(cid):
 
 def lephare_z_for_id(cid):
     """Look up zfinal for `cid` in the lephare catalog."""
-    master  = Table.read(MASTER_FITS)
-    lephare = Table.read(LEPHARE_FITS)
+    master  = _master_table()
+    lephare = _lephare_table()
     idx = (master["id"] == cid).nonzero()[0][0]
     return float(lephare["zfinal"][idx])
 
