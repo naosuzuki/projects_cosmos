@@ -50,6 +50,16 @@ CANDIDATE_LISTS = {
         fits=CAND_DIR / "sn_candidates_acs_only.fits",
         ra_col="ra", dec_col="dec",
         id_col="number", mag_col="mag_auto"),
+    "known34":     dict(
+        fits=CAND_DIR / "known34_sn.fits",
+        ra_col="ra", dec_col="dec",
+        id_col="id", mag_col="mag_auto_f150w"),
+    "known34c":    dict(
+        # SN-centered re-cutout test list.  ra,dec point at the SN position
+        # (not the master-catalog host).  host_ra/host_dec audit columns.
+        fits=CAND_DIR / "known34c_single.fits",
+        ra_col="ra", dec_col="dec",
+        id_col="id", mag_col="mag_auto_f150w"),
 }
 
 CUTOUT_SIZE = 6.0 * u.arcsec
@@ -86,8 +96,9 @@ def find_tile(ra, dec, tile_index):
     return None
 
 
-def render_gray(data, png_path, label_lines):
-    """create_blackwhite_hst() recipe."""
+def render_gray(data, png_path, label_lines, no_labels=False):
+    """create_blackwhite_hst() recipe.  no_labels=True skips the upper-left
+    baked-in text so a post-processor can stamp polished labels."""
     minimum = 0.0001
     bw = np.where(data > minimum, data, minimum)
     bw = np.sqrt(bw)
@@ -101,18 +112,22 @@ def render_gray(data, png_path, label_lines):
     ax = fig.add_subplot(111)
     ax.imshow(bw, origin="lower", cmap="gray", vmin=minimum, vmax=maximum)
     ax.axis("off")
-    for k, txt in enumerate(label_lines):
-        ax.text(0.03, 0.95 - 0.07*k, txt, color="white",
-                fontsize=11, transform=ax.transAxes,
-                verticalalignment="top",
-                family="serif", weight="bold")
+    if not no_labels:
+        for k, txt in enumerate(label_lines):
+            ax.text(0.03, 0.95 - 0.07*k, txt, color="white",
+                    fontsize=11, transform=ax.transAxes,
+                    verticalalignment="top",
+                    family="serif", weight="bold")
     fig.tight_layout(pad=0)
     fig.savefig(png_path, bbox_inches="tight", pad_inches=0, dpi=120)
     plt.close(fig)
 
 
-def process_list(list_name, tiles, loaded, n_max=0):
-    """Process one candidate list, reusing tile index + data cache."""
+def process_list(list_name, tiles, loaded, n_max=0, no_labels=False):
+    """Process one candidate list, reusing tile index + data cache.
+
+    no_labels=True skips the matplotlib upper-left text (post-process can
+    stamp polished labels)."""
     cfg = CANDIDATE_LISTS[list_name]
     print(f"\n=== {list_name} ===", flush=True)
     print(f"Reading candidates: {cfg['fits']}", flush=True)
@@ -162,7 +177,7 @@ def process_list(list_name, tiles, loaded, n_max=0):
         png_name = f"sn_{list_name}_{seq:04d}_hst.png"
         png_path = PNG_DIR / png_name
         label = [f"ID={cid}", f"F814W={mag:.2f}" if np.isfinite(mag) else "F814W=?"]
-        render_gray(cut.data, png_path, label)
+        render_gray(cut.data, png_path, label, no_labels=no_labels)
         n_ok += 1
         w.writerow([seq, cid, f"{ra:.6f}", f"{dec:.6f}",
                     f"{mag:.2f}", tile, png_name])
@@ -181,6 +196,8 @@ def main():
                     help="Process all 3 lists in one process (shared tile cache).")
     ap.add_argument("--max", type=int, default=0,
                     help="Cap candidates per list (0 = no cap; default 0).")
+    ap.add_argument("--no-labels", action="store_true",
+                    help="Skip the baked-in upper-left labels.")
     args = ap.parse_args()
 
     PNG_DIR.mkdir(parents=True, exist_ok=True)
@@ -193,7 +210,7 @@ def main():
     loaded = {}  # tile -> array, shared across all lists
     targets = list(CANDIDATE_LISTS.keys()) if args.all else [args.list]
     for ln in targets:
-        process_list(ln, tiles, loaded, n_max=args.max)
+        process_list(ln, tiles, loaded, n_max=args.max, no_labels=args.no_labels)
     print(f"\nAll done. Cached tiles: {len(loaded)}", flush=True)
 
 

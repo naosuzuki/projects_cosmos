@@ -34,7 +34,7 @@ LINK_TARGETS = {
     "euclid": Path("/Volumes/exdisk1/data/Euclid/COSMOS_DR1_png"),
 }
 
-LISTS = ["euclid_only", "jwst_only", "acs_only"]
+LISTS = ["euclid_only", "jwst_only", "acs_only", "known34"]
 PER_PAGE = 100
 # ============================================================
 

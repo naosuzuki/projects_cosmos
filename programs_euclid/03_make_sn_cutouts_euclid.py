@@ -49,6 +49,14 @@ CANDIDATE_LISTS = {
         fits=CAND_DIR / "sn_candidates_acs_only.fits",
         ra_col="ra", dec_col="dec",
         id_col="number", mag_col="mag_auto"),
+    "known34":     dict(
+        fits=CAND_DIR / "known34_sn.fits",
+        ra_col="ra", dec_col="dec",
+        id_col="id", mag_col="mag_auto_f150w"),
+    "known34c":    dict(
+        fits=CAND_DIR / "known34c_single.fits",
+        ra_col="ra", dec_col="dec",
+        id_col="id", mag_col="mag_auto_f150w"),
 }
 
 CUTOUT_SIZE = 6.0 * u.arcsec
@@ -96,8 +104,8 @@ def find_tile(ra, dec, tile_index):
     return None
 
 
-def render_gray(data, png_path, label_lines):
-    """Same recipe as HST grayscale."""
+def render_gray(data, png_path, label_lines, no_labels=False):
+    """Same recipe as HST grayscale.  no_labels=True skips upper-left text."""
     minimum = 0.0001
     bw = np.where(data > minimum, data, minimum)
     bw = np.sqrt(bw)
@@ -111,18 +119,20 @@ def render_gray(data, png_path, label_lines):
     ax = fig.add_subplot(111)
     ax.imshow(bw, origin="lower", cmap="gray", vmin=minimum, vmax=maximum)
     ax.axis("off")
-    for k, txt in enumerate(label_lines):
-        ax.text(0.03, 0.95 - 0.07*k, txt, color="white",
-                fontsize=11, transform=ax.transAxes,
-                verticalalignment="top",
-                family="serif", weight="bold")
+    if not no_labels:
+        for k, txt in enumerate(label_lines):
+            ax.text(0.03, 0.95 - 0.07*k, txt, color="white",
+                    fontsize=11, transform=ax.transAxes,
+                    verticalalignment="top",
+                    family="serif", weight="bold")
     fig.tight_layout(pad=0)
     fig.savefig(png_path, bbox_inches="tight", pad_inches=0, dpi=120)
     plt.close(fig)
 
 
-def render_rgb(b_data, g_data, r_data, png_path, label_lines):
-    """create_colorimg_jwst() recipe (B=Y, G=J, R=H for Euclid NISP)."""
+def render_rgb(b_data, g_data, r_data, png_path, label_lines, no_labels=False):
+    """create_colorimg_jwst() recipe (B=Y, G=J, R=H for Euclid NISP).
+    no_labels=True skips upper-left text."""
     minimum = 1e-5
     b = np.sqrt(np.where(b_data > minimum, b_data, minimum))
     g = np.sqrt(np.where(g_data > minimum, g_data, minimum))
@@ -146,17 +156,19 @@ def render_rgb(b_data, g_data, r_data, png_path, label_lines):
     ax = fig.add_subplot(111)
     ax.imshow(rgb, origin="lower")
     ax.axis("off")
-    for k, txt in enumerate(label_lines):
-        ax.text(0.03, 0.95 - 0.07*k, txt, color="white",
-                fontsize=11, transform=ax.transAxes,
-                verticalalignment="top",
-                family="serif", weight="bold")
+    if not no_labels:
+        for k, txt in enumerate(label_lines):
+            ax.text(0.03, 0.95 - 0.07*k, txt, color="white",
+                    fontsize=11, transform=ax.transAxes,
+                    verticalalignment="top",
+                    family="serif", weight="bold")
     fig.tight_layout(pad=0)
     fig.savefig(png_path, bbox_inches="tight", pad_inches=0, dpi=120)
     plt.close(fig)
 
 
-def process_list(list_name, tile_vis, tile_y, tile_j, tile_h, cache, n_max=0):
+def process_list(list_name, tile_vis, tile_y, tile_j, tile_h, cache, n_max=0,
+                 no_labels=False):
     """Process one candidate list, reusing tile indices + data cache."""
     cfg = CANDIDATE_LISTS[list_name]
     print(f"\n=== {list_name} ===", flush=True)
@@ -204,7 +216,8 @@ def process_list(list_name, tile_vis, tile_y, tile_j, tile_h, cache, n_max=0):
             vis_png_name = f"sn_{list_name}_{seq:04d}_euclid_vis.png"
             render_gray(cut_vis.data, PNG_DIR / vis_png_name,
                         [f"ID={cid}", f"VIS={mag:.2f}"
-                         if np.isfinite(mag) else "VIS=?"])
+                         if np.isfinite(mag) else "VIS=?"],
+                        no_labels=no_labels)
             n_vis += 1
         except Exception as e:
             print(f"  [{seq:04d}] VIS cutout failed: {e}", flush=True)
@@ -220,7 +233,7 @@ def process_list(list_name, tile_vis, tile_y, tile_j, tile_h, cache, n_max=0):
                               position, size=CUTOUT_SIZE, wcs=tile_h[tile]["wcs"])
                 nisp_png_name = f"sn_{list_name}_{seq:04d}_euclid_nisp.png"
                 render_rgb(cy.data, cj.data, ch.data, PNG_DIR / nisp_png_name,
-                           [f"ID={cid}", "Y/J/H"])
+                           [f"ID={cid}", "Y/J/H"], no_labels=no_labels)
                 n_nisp += 1
         except Exception as e:
             print(f"  [{seq:04d}] NISP cutout failed: {e}", flush=True)
@@ -242,6 +255,8 @@ def main():
                     help="Process all 3 lists in one process (shared tile cache).")
     ap.add_argument("--max", type=int, default=0,
                     help="Cap candidates per list (0 = no cap; default 0).")
+    ap.add_argument("--no-labels", action="store_true",
+                    help="Skip the baked-in upper-left labels.")
     args = ap.parse_args()
 
     PNG_DIR.mkdir(parents=True, exist_ok=True)
@@ -257,7 +272,8 @@ def main():
     cache = {}  # path -> array, shared across all lists
     targets = list(CANDIDATE_LISTS.keys()) if args.all else [args.list]
     for ln in targets:
-        process_list(ln, tile_vis, tile_y, tile_j, tile_h, cache, n_max=args.max)
+        process_list(ln, tile_vis, tile_y, tile_j, tile_h, cache,
+                     n_max=args.max, no_labels=args.no_labels)
     print(f"\nAll done. Cached arrays: {len(cache)}", flush=True)
 
 
