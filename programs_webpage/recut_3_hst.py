@@ -203,6 +203,12 @@ def resolve_euclid_path(eu_tile, band):
 
 _FITS_CACHE = {}   # path -> open HDUList (kept open for the script's lifetime)
 _WCS_CACHE  = {}   # path -> WCS (avoids re-parsing the header per call)
+_Z_LOOKUP   = None # id -> zfinal (LEPHARE), built once on first lookup
+
+
+# Catalog paths for host-z lookup (row-matched MASTER + LEPHARE).
+MASTER_FITS  = "/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits"
+LEPHARE_FITS = "/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1_lephare.fits"
 
 
 def _open_cached(path):
@@ -215,6 +221,92 @@ def _wcs_cached(path, hdu):
     if path not in _WCS_CACHE:
         _WCS_CACHE[path] = WCS(hdu.header)
     return _WCS_CACHE[path]
+
+
+def find_sn_point_source(sci_path, hint_ra, hint_dec, kind="generic",
+                         box_arcsec=2.0, search_arcsec=0.6, bg_inner=1.0, bg_outer=1.8):
+    """Locate a SN point source near (hint_ra, hint_dec) in `sci_path`.
+
+    Algorithm:
+      1. Cut a `box_arcsec` box around the hint (memory-mapped slice — fast).
+      2. Estimate local background from an annulus (bg_inner..bg_outer arcsec)
+         around the box centre — the annulus stays within the box and samples
+         the host's smooth light.
+      3. Subtract the background → residual image (host's extended light gone).
+      4. Smooth the residual lightly (Gaussian σ ≈ 0.4 arcsec, ~ Euclid PSF).
+      5. Find the peak in the residual within `search_arcsec` of the hint
+         — that's the SN point source.
+      6. Subpixel centroid using intensity-weighted moments on a 3-px box.
+    Returns (sn_ra, sn_dec) or (hint_ra, hint_dec) on failure.
+    """
+    try:
+        from scipy.ndimage import gaussian_filter
+        h = _open_cached(sci_path)
+        sci_hdu = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
+        wcs = _wcs_cached(sci_path, sci_hdu)
+        pix_scale = float(np.sqrt(np.abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600.0
+        half_px = int(np.ceil(box_arcsec / pix_scale)) + 1
+        sx, sy = wcs.all_world2pix(hint_ra, hint_dec, 0)
+        sx, sy = float(sx), float(sy)
+        ny = int(sci_hdu.header.get("NAXIS2", 0))
+        nx = int(sci_hdu.header.get("NAXIS1", 0))
+        x0 = max(0, int(sx) - half_px); x1 = min(nx, int(sx) + half_px + 1)
+        y0 = max(0, int(sy) - half_px); y1 = min(ny, int(sy) + half_px + 1)
+        sub = sci_hdu.data[y0:y1, x0:x1].astype(np.float64)
+        if sub.size == 0:
+            return float(hint_ra), float(hint_dec)
+        # Distance from hint (in sub-box pixel coords)
+        yy, xx = np.indices(sub.shape)
+        hx = sx - x0; hy = sy - y0
+        r_px = np.sqrt((xx - hx) ** 2 + (yy - hy) ** 2)
+        ring = (r_px >= bg_inner / pix_scale) & (r_px <= bg_outer / pix_scale)
+        if ring.any():
+            bg = float(np.nanmedian(sub[ring]))
+        else:
+            bg = float(np.nanmedian(sub))
+        resid = sub - bg
+        # Smooth ~ 1 PSF FWHM
+        sigma_px = max(0.5, 0.4 / pix_scale)
+        smoothed = gaussian_filter(np.where(np.isfinite(resid), resid, 0.0), sigma=sigma_px)
+        # Only look within search_arcsec of the hint
+        search_mask = r_px <= search_arcsec / pix_scale
+        masked = np.where(search_mask, smoothed, -np.inf)
+        py, px = np.unravel_index(np.nanargmax(masked), masked.shape)
+        if not np.isfinite(masked[py, px]):
+            return float(hint_ra), float(hint_dec)
+        # Subpixel centroid (small box around the peak)
+        h_box = 2
+        yy0, yy1 = max(0, py-h_box), min(smoothed.shape[0], py+h_box+1)
+        xx0, xx1 = max(0, px-h_box), min(smoothed.shape[1], px+h_box+1)
+        p = smoothed[yy0:yy1, xx0:xx1].copy()
+        p = np.where(p > 0, p, 0)
+        if p.sum() > 0:
+            ys, xs = np.indices(p.shape)
+            cx = (xs * p).sum() / p.sum() + xx0
+            cy = (ys * p).sum() / p.sum() + yy0
+        else:
+            cx, cy = float(px), float(py)
+        cx_full = cx + x0
+        cy_full = cy + y0
+        sn_ra, sn_dec = wcs.all_pix2world(cx_full, cy_full, 0)
+        return float(sn_ra), float(sn_dec)
+    except Exception as e:
+        print(f"      (find_sn_point_source failed on {sci_path}: {e})", flush=True)
+        return float(hint_ra), float(hint_dec)
+
+
+def _lephare_z(cid):
+    """LEPHARE zfinal for catalog id `cid`.  Lazy-loads a dict on first call
+    (just the `id` column of MASTER + the `zfinal` column of LEPHARE — much
+    cheaper than reading the full Tables).  Returns NaN if not found."""
+    global _Z_LOOKUP
+    if _Z_LOOKUP is None:
+        with fits.open(MASTER_FITS, memmap=True) as h:
+            ids = np.asarray(h[1].data["id"]).astype(int)
+        with fits.open(LEPHARE_FITS, memmap=True) as h:
+            zs = np.asarray(h[1].data["zfinal"]).astype(float)
+        _Z_LOOKUP = dict(zip(ids.tolist(), zs.tolist()))
+    return float(_Z_LOOKUP.get(int(cid), float("nan")))
 
 
 def aper_photometry(sci_path, err_path, kind, sn_ra, sn_dec):
@@ -400,11 +492,23 @@ def main():
         # Aperture photometry (--measure).  Re-uses the same FITS_CACHE so
         # the per-band file is already open from the cut() calls above.
         if args.measure:
+            host_ra_s  = float(src.get("host_ra", src["sn_ra"]))
+            host_dec_s = float(src.get("host_dec", src["sn_dec"]))
+            sep_arcsec = float(
+                SkyCoord(src["sn_ra"], src["sn_dec"], unit="deg").separation(
+                SkyCoord(host_ra_s, host_dec_s, unit="deg")).to(u.arcsec).value
+            )
             row = dict(id=src["id"],
                        telescope=src.get("telescope", "HST"),
-                       host_ra=src.get("host_ra", src["sn_ra"]),
-                       host_dec=src.get("host_dec", src["sn_dec"]),
-                       sn_ra=src["sn_ra"], sn_dec=src["sn_dec"])
+                       hst_tile=src.get("hst", ""),
+                       jwst_tile=src.get("jwst", ""),
+                       euclid_tile=src.get("euclid", ""),
+                       host_ra=host_ra_s,
+                       host_dec=host_dec_s,
+                       sn_ra=src["sn_ra"],
+                       sn_dec=src["sn_dec"],
+                       sn_host_sep_arcsec=round(sep_arcsec, 3),
+                       host_z=round(_lephare_z(src["id"]), 4))
             best_band = "F814W"; best_snr = -999.0
             for label, kind, paths_fn in BANDS_PHOT:
                 sci_p, err_p = paths_fn(src)
@@ -420,9 +524,16 @@ def main():
             phot_rows.append(row)
             print(f"  photometry: best={best_band}@{best_snr:.1f}σ", flush=True)
 
-    # Write CSV with the same column order as /tmp/sn_5.csv
+    # Write CSV with extended schema (added 2026-05-26):
+    #   * hst/jwst/euclid tile numbers (self-documenting — no external
+    #     lookup needed to know which FITS each measurement came from)
+    #   * sn_host_sep_arcsec (computed from SkyCoord.separation)
+    #   * host_z = LEPHARE zfinal (cached lookup)
     if args.measure and phot_rows:
-        cols = ["id","telescope","host_ra","host_dec","sn_ra","sn_dec",
+        cols = ["id","telescope",
+                "hst_tile","jwst_tile","euclid_tile",
+                "host_ra","host_dec","sn_ra","sn_dec","sn_host_sep_arcsec",
+                "host_z",
                 "best_band","best_snr","combined_sigma",
                 "mag_F814W","mag_VIS","mag_Y","mag_J","mag_H",
                 "mag_F115W","mag_F150W","mag_F277W","mag_F444W",
