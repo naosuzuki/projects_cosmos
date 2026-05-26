@@ -223,6 +223,122 @@ def _wcs_cached(path, hdu):
     return _WCS_CACHE[path]
 
 
+# ----- DAOStarFinder-based SN point-source detection -----
+#
+# v13 design: replace the home-brew "smooth + peak + bg-subtract" centroid
+# (which kept finding the host galaxy instead of the SN) with the standard
+# astropy/photutils DAOPHOT FIND implementation.  DAOStarFinder convolves
+# the image with a Gaussian of the PSF FWHM, so its response is strong only
+# for compact PSF-shaped sources and weak for extended host emission —
+# exactly the discrimination we need for SN-near-host detection.
+#
+# Per-telescope detection band + PSF FWHM (used by --find-sn):
+#   HST     -> F814W         FWHM ~ 0.090"
+#   JWST    -> F115W (bluest, sharpest PSF, SN usually brighter blue)
+#                            FWHM ~ 0.045"
+#   EUCLID  -> NIR-H         FWHM ~ 0.48"
+
+def _hst_path_fn(src):
+    return f"{HST_DIR}/acs_I_030mas_{src['hst']}_sci.fits"
+
+def _jwst_f115w_path_fn(src):
+    return resolve_jwst_path(src["jwst"], "f115w")
+
+def _eu_nisp_h_path_fn(src):
+    return _eu_path(src["euclid"], "NIR-H")[0]
+
+DETECT_BAND = {
+    # telescope-tag -> (psf_fwhm_arcsec, path_fn(src) -> sci_path)
+    "HST":         (0.090, _hst_path_fn),
+    "JWST":        (0.045, _jwst_f115w_path_fn),
+    "EUCLID":      (0.48,  _eu_nisp_h_path_fn),
+    "EUCLID-NISP": (0.48,  _eu_nisp_h_path_fn),
+    "NISP":        (0.48,  _eu_nisp_h_path_fn),
+}
+
+
+def _dao_fail(hint_ra, hint_dec, n=0):
+    """Fallback dict when DAO cannot find a compact source: keep the hint."""
+    return dict(success=False, sn_ra=float(hint_ra), sn_dec=float(hint_dec),
+                n_candidates=int(n), peak=0.0, moved_arcsec=0.0)
+
+
+def find_sn_via_dao(sci_path, hint_ra, hint_dec, psf_fwhm_arcsec=0.1,
+                    search_arcsec=2.5, threshold_sigma=5.0):
+    """Find SN point source near (hint_ra, hint_dec) using DAOStarFinder.
+
+    Algorithm (all on a small cutout, sliced from the memory-mapped HDU):
+      1. sigma_clipped_stats -> robust local background median + std
+      2. DAOStarFinder(fwhm=PSF_in_pixels, threshold=Nσ) -> compact sources
+         (the FWHM convolution kernel suppresses extended host emission)
+      3. keep only candidates within `search_arcsec` of the hint
+      4. pick the BRIGHTEST candidate (`peak` flux)
+      5. return its WCS RA/Dec (already a subpixel centroid from DAO)
+
+    File-open efficient: uses the shared _FITS_CACHE / _WCS_CACHE so the
+    same FITS is opened only once per process even when cut() / aper_photometry
+    read it again later.
+
+    Returns dict:
+        success         True if a compact source was found within search_arcsec
+        sn_ra, sn_dec   refined SN position (= hint if no detection)
+        n_candidates    number of compact sources DAO found in the search box
+        peak            peak flux of the chosen source
+        moved_arcsec    distance the position moved from the hint
+    """
+    try:
+        from photutils.detection import DAOStarFinder
+        from astropy.stats import sigma_clipped_stats
+        h = _open_cached(sci_path)
+        sci_hdu = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
+        wcs = _wcs_cached(sci_path, sci_hdu)
+        pix_scale = float(np.sqrt(np.abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600.0
+        fwhm_px = max(1.5, psf_fwhm_arcsec / pix_scale)
+        box_arcsec = max(search_arcsec * 2.0, 5.0)
+        half = int(np.ceil(box_arcsec / pix_scale)) + 1
+        sx, sy = wcs.all_world2pix(hint_ra, hint_dec, 0)
+        sx, sy = float(sx), float(sy)
+        ny = int(sci_hdu.header.get("NAXIS2", 0)) or sci_hdu.data.shape[-2]
+        nx = int(sci_hdu.header.get("NAXIS1", 0)) or sci_hdu.data.shape[-1]
+        x0 = max(0, int(sx) - half); x1 = min(nx, int(sx) + half + 1)
+        y0 = max(0, int(sy) - half); y1 = min(ny, int(sy) + half + 1)
+        # SLICE FIRST (memory-mapped, only the box), then astype.
+        sub = sci_hdu.data[y0:y1, x0:x1].astype(np.float64)
+        if sub.size == 0:
+            return _dao_fail(hint_ra, hint_dec)
+        finite = np.isfinite(sub) & (sub != 0)
+        if not finite.any():
+            return _dao_fail(hint_ra, hint_dec)
+        _, bg_median, bg_std = sigma_clipped_stats(sub[finite], sigma=3.0, maxiters=3)
+        finder = DAOStarFinder(fwhm=fwhm_px, threshold=threshold_sigma * bg_std)
+        sources = finder(sub - bg_median)
+        if sources is None or len(sources) == 0:
+            return _dao_fail(hint_ra, hint_dec)
+        hint_px_x = sx - x0
+        hint_px_y = sy - y0
+        dx_px = np.asarray(sources["xcentroid"]) - hint_px_x
+        dy_px = np.asarray(sources["ycentroid"]) - hint_px_y
+        r_arcsec = np.sqrt(dx_px**2 + dy_px**2) * pix_scale
+        in_search = r_arcsec <= search_arcsec
+        if not in_search.any():
+            return _dao_fail(hint_ra, hint_dec, n=len(sources))
+        candidates = sources[in_search]
+        best_idx = int(np.argmax(np.asarray(candidates["peak"])))
+        best = candidates[best_idx]
+        cx_full = float(best["xcentroid"]) + x0
+        cy_full = float(best["ycentroid"]) + y0
+        sn_ra, sn_dec = wcs.all_pix2world(cx_full, cy_full, 0)
+        moved = float(SkyCoord(hint_ra, hint_dec, unit="deg").separation(
+                      SkyCoord(float(sn_ra), float(sn_dec), unit="deg")).to(u.arcsec).value)
+        return dict(success=True, sn_ra=float(sn_ra), sn_dec=float(sn_dec),
+                    n_candidates=int(in_search.sum()),
+                    peak=float(best["peak"]),
+                    moved_arcsec=moved)
+    except Exception as e:
+        print(f"      DAO error on {sci_path}: {type(e).__name__}: {e}", flush=True)
+        return _dao_fail(hint_ra, hint_dec)
+
+
 def find_sn_point_source(sci_path, hint_ra, hint_dec, kind="generic",
                          box_arcsec=2.0, search_arcsec=0.6, bg_inner=1.0, bg_outer=1.8):
     """Locate a SN point source near (hint_ra, hint_dec) in `sci_path`.
@@ -411,6 +527,15 @@ def main():
                     help="lookup-table CSV with columns: id, telescope, sn_ra, "
                          "sn_dec, host_ra, host_dec, hst, jwst, euclid. "
                          "Replaces the hardcoded SOURCES list when provided.")
+    ap.add_argument("--find-sn", action="store_true",
+                    help="run DAOStarFinder on the detection band per source "
+                         "(HST->F814W, JWST->F115W, EUCLID->NIR-H) to refine "
+                         "the SN position before cutout+photometry. Pure peak "
+                         "detection + intensity centroid; no host-galaxy model.")
+    ap.add_argument("--search-arcsec", type=float, default=2.5,
+                    help="DAO search radius around the input hint (arcsec)")
+    ap.add_argument("--threshold-sigma", type=float, default=5.0,
+                    help="DAO detection threshold in units of local σ")
     args = ap.parse_args()
     crosshair = not args.no_crosshair
 
@@ -433,9 +558,35 @@ def main():
 
     phot_rows = [] if args.measure else None
     for src in sources:
-        pos = SkyCoord(src["sn_ra"], src["sn_dec"], unit="deg", frame="icrs")
         seqn = f"{src['seq']:04d}"
         print(f"\n==== ID={src['id']} seq={seqn} ====", flush=True)
+        # --- Optional DAO point-source refinement (BEFORE pos/cut) ---
+        if args.find_sn:
+            tel = src.get("telescope", "JWST").strip().upper()
+            entry = DETECT_BAND.get(tel)
+            if entry is None:
+                print(f"  DAO: no detection band defined for telescope={tel}; "
+                      f"keeping hint", flush=True)
+            else:
+                fwhm_arcsec, path_fn = entry
+                det_path = path_fn(src)
+                if det_path is None or not Path(det_path).exists():
+                    print(f"  DAO: detection file missing ({det_path}); "
+                          f"keeping hint", flush=True)
+                else:
+                    r = find_sn_via_dao(det_path, src["sn_ra"], src["sn_dec"],
+                                        psf_fwhm_arcsec=fwhm_arcsec,
+                                        search_arcsec=args.search_arcsec,
+                                        threshold_sigma=args.threshold_sigma)
+                    flag = "OK " if r["success"] else "no compact source"
+                    print(f"  DAO ({tel}, fwhm={fwhm_arcsec}\"): {flag}  "
+                          f"moved={r['moved_arcsec']:.2f}\"  "
+                          f"candidates={r['n_candidates']}  "
+                          f"peak={r['peak']:.4g}", flush=True)
+                    if r["success"]:
+                        src["sn_ra"]  = r["sn_ra"]
+                        src["sn_dec"] = r["sn_dec"]
+        pos = SkyCoord(src["sn_ra"], src["sn_dec"], unit="deg", frame="icrs")
         print(f"  SN @ RA={src['sn_ra']:.6f} Dec={src['sn_dec']:.6f}", flush=True)
 
         # HST
