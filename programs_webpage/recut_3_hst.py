@@ -294,6 +294,217 @@ def _dao_fail(hint_ra, hint_dec, n=0):
                 n_candidates=int(n), peak=0.0, moved_arcsec=0.0)
 
 
+# ─────────────────────────────────────────────────────────────────────
+# v17: multi-band DAO + multi-band verification + v15 structural selection
+#
+# Detection bands per telescope (for the DAO scan — union of candidates):
+#   HST     -> F814W only
+#   JWST    -> F115W (blue) + F277W (red)  -- catches both color extremes
+#   EUCLID  -> NIR-Y (blue) + NIR-H (red)
+#
+# Verification bands (for the user's "1x5sigma + >=2x3sigma" criterion):
+#   HST     -> F814W (only; require >= 5sigma)
+#   JWST    -> F115W, F150W, F277W, F444W (4 bands)
+#   EUCLID  -> NIR-Y, J, H (3 bands; skip VIS — different epoch)
+# ─────────────────────────────────────────────────────────────────────
+
+def _jwst_band_path_fn(band):
+    return lambda src: resolve_jwst_path(src["jwst"], band)
+
+def _eu_band_path_fn(band):
+    return lambda src: _eu_path(src["euclid"], band)[0]
+
+MULTIBAND_DAO = {
+    # telescope -> list of (band_label, path_fn, psf_fwhm_arcsec, kind)
+    "HST":         [("F814W", _hst_path_fn,         0.134, "hst")],
+    "JWST":        [("F115W", _jwst_f115w_path_fn,  0.057, "jwst"),
+                    ("F277W", _jwst_band_path_fn("f277w"), 0.130, "jwst")],
+    "EUCLID":      [("NIR-Y", _eu_nisp_y_path_fn,   0.524, "euclid"),
+                    ("NIR-H", _eu_nisp_h_path_fn,   0.567, "euclid")],
+    "EUCLID-NISP": [("NIR-Y", _eu_nisp_y_path_fn,   0.524, "euclid"),
+                    ("NIR-H", _eu_nisp_h_path_fn,   0.567, "euclid")],
+    "NISP":        [("NIR-Y", _eu_nisp_y_path_fn,   0.524, "euclid"),
+                    ("NIR-H", _eu_nisp_h_path_fn,   0.567, "euclid")],
+}
+
+VERIFY_BANDS = {
+    # telescope -> list of (band_label, path_fn, kind)
+    "HST":         [("F814W", _hst_path_fn,                "hst")],
+    "JWST":        [("F115W", _jwst_band_path_fn("f115w"), "jwst"),
+                    ("F150W", _jwst_band_path_fn("f150w"), "jwst"),
+                    ("F277W", _jwst_band_path_fn("f277w"), "jwst"),
+                    ("F444W", _jwst_band_path_fn("f444w"), "jwst")],
+    "EUCLID":      [("NIR-Y", _eu_band_path_fn("NIR-Y"),   "euclid"),
+                    ("NIR-J", _eu_band_path_fn("NIR-J"),   "euclid"),
+                    ("NIR-H", _eu_band_path_fn("NIR-H"),   "euclid")],
+    "EUCLID-NISP": [("NIR-Y", _eu_band_path_fn("NIR-Y"),   "euclid"),
+                    ("NIR-J", _eu_band_path_fn("NIR-J"),   "euclid"),
+                    ("NIR-H", _eu_band_path_fn("NIR-H"),   "euclid")],
+    "NISP":        [("NIR-Y", _eu_band_path_fn("NIR-Y"),   "euclid"),
+                    ("NIR-J", _eu_band_path_fn("NIR-J"),   "euclid"),
+                    ("NIR-H", _eu_band_path_fn("NIR-H"),   "euclid")],
+}
+
+
+def _run_dao_candidates(sci_path, hint_ra, hint_dec, psf_fwhm_arcsec,
+                         search_arcsec, threshold_sigma):
+    """Run DAOStarFinder once; return list of candidate dicts within search radius."""
+    try:
+        from photutils.detection import DAOStarFinder
+        from astropy.stats import sigma_clipped_stats
+        h = _open_cached(sci_path)
+        sci_hdu = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
+        wcs = _wcs_cached(sci_path, sci_hdu)
+        pix_scale = float(np.sqrt(np.abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600.0
+        fwhm_px = max(1.5, psf_fwhm_arcsec / pix_scale)
+        box_arcsec = max(search_arcsec * 2.0, 5.0)
+        half = int(np.ceil(box_arcsec / pix_scale)) + 1
+        sx, sy = wcs.all_world2pix(hint_ra, hint_dec, 0)
+        sx, sy = float(sx), float(sy)
+        ny = int(sci_hdu.header.get("NAXIS2", 0)) or sci_hdu.data.shape[-2]
+        nx = int(sci_hdu.header.get("NAXIS1", 0)) or sci_hdu.data.shape[-1]
+        x0 = max(0, int(sx) - half); x1 = min(nx, int(sx) + half + 1)
+        y0 = max(0, int(sy) - half); y1 = min(ny, int(sy) + half + 1)
+        sub = sci_hdu.data[y0:y1, x0:x1].astype(np.float64)
+        if sub.size == 0: return []
+        finite = np.isfinite(sub) & (sub != 0)
+        if not finite.any(): return []
+        _, bg_med, bg_std = sigma_clipped_stats(sub[finite], sigma=3.0, maxiters=3)
+        sources = DAOStarFinder(fwhm=fwhm_px, threshold=threshold_sigma*bg_std)(sub - bg_med)
+        if sources is None or len(sources) == 0: return []
+        hpx = sx - x0; hpy = sy - y0
+        dx = np.asarray(sources["xcentroid"]) - hpx
+        dy = np.asarray(sources["ycentroid"]) - hpy
+        r = np.sqrt(dx**2 + dy**2) * pix_scale
+        in_search = r <= search_arcsec
+        if not in_search.any(): return []
+        out = []
+        for s in sources[in_search]:
+            ra, dec = wcs.all_pix2world(float(s["xcentroid"])+x0,
+                                        float(s["ycentroid"])+y0, 0)
+            out.append(dict(ra=float(ra), dec=float(dec),
+                            peak=float(s["peak"]),
+                            sharp=float(s["sharpness"]),
+                            rnd1=float(s["roundness1"])))
+        return out
+    except Exception as e:
+        print(f"      DAO error on {sci_path}: {type(e).__name__}: {e}", flush=True)
+        return []
+
+
+def find_sn_via_multiband_dao(src, host_ra, host_dec,
+                              search_arcsec=2.5, threshold_sigma=5.0,
+                              max_snr_req=5.0, n_3sig_req=3,
+                              dedupe_arcsec=0.15):
+    """v17 multi-band detector.
+
+    1. Run DAO in 2 detection bands per telescope, union the candidates
+       (deduped within `dedupe_arcsec`).
+    2. For each unique candidate, measure aperture S/N in ALL verification
+       bands of that telescope.
+    3. Filter: keep candidates with max_snr >= max_snr_req AND
+       n_3sig_bands >= n_3sig_req.
+       (For HST: require only F814W >= max_snr_req — single band exception.)
+    4. Apply v15 structural heuristic (offset / on-host / multi-comp) to
+       choose the SN among the verified candidates.
+    """
+    telescope = src.get("telescope", "JWST").strip().upper()
+    dao_set    = MULTIBAND_DAO.get(telescope)
+    verify_set = VERIFY_BANDS.get(telescope)
+    if dao_set is None or verify_set is None:
+        return _dao_fail(host_ra, host_dec)
+    is_single_band = (len(verify_set) == 1)   # HST case
+
+    # ── Step 1: collect candidates from each DAO band ──
+    all_cands = []
+    for band, path_fn, fwhm_arc, kind in dao_set:
+        sci_path = path_fn(src)
+        if sci_path is None or not Path(sci_path).exists(): continue
+        cands = _run_dao_candidates(sci_path, host_ra, host_dec, fwhm_arc,
+                                    search_arcsec, threshold_sigma)
+        for c in cands:
+            all_cands.append((c["ra"], c["dec"], c["peak"], band))
+
+    if not all_cands:
+        return _dao_fail(host_ra, host_dec)
+
+    # ── Step 2: dedupe across bands ──
+    unique = []
+    for ra, dec, peak, band in all_cands:
+        merged = False
+        for u_entry in unique:
+            sep = SkyCoord(ra, dec, unit="deg").separation(
+                  SkyCoord(u_entry["ra"], u_entry["dec"], unit="deg")).to(u.arcsec).value
+            if sep < dedupe_arcsec:
+                u_entry["max_peak"] = max(u_entry["max_peak"], peak)
+                u_entry["bands"].add(band)
+                merged = True
+                break
+        if not merged:
+            unique.append(dict(ra=ra, dec=dec, max_peak=peak, bands={band}))
+
+    # ── Step 3: verify each candidate with aper photometry in ALL bands ──
+    verified = []
+    for u_entry in unique:
+        snrs = {}
+        for band, path_fn, kind in verify_set:
+            sp = path_fn(src)
+            if sp is None or not Path(sp).exists(): continue
+            mag, snr = aper_photometry(sp, None, kind, u_entry["ra"], u_entry["dec"])
+            snrs[band] = float(snr) if snr else 0.0
+        max_snr = max(snrs.values()) if snrs else 0.0
+        n_3sig  = sum(1 for s in snrs.values() if s >= 3.0)
+        if is_single_band:
+            criterion = max_snr >= max_snr_req
+        else:
+            criterion = max_snr >= max_snr_req and n_3sig >= n_3sig_req
+        if criterion:
+            u_entry["snrs"]    = snrs
+            u_entry["max_snr"] = max_snr
+            u_entry["n_3sig"]  = n_3sig
+            verified.append(u_entry)
+
+    if not verified:
+        return _dao_fail(host_ra, host_dec, n=len(unique))
+
+    # ── Step 4: v15 structural heuristic on verified candidates ──
+    HOST_NEAR_AS, NEAR_HOST_AS, OFF_HOST_RATIO = 0.3, 0.5, 0.2
+
+    # Compute sep_host for each
+    for v in verified:
+        v["sep_host"] = SkyCoord(v["ra"], v["dec"], unit="deg").separation(
+                        SkyCoord(host_ra, host_dec, unit="deg")).to(u.arcsec).value
+
+    # Sort by max DAO peak (= "most compact PSF-like").  Critical NOT to
+    # sort by max_snr: aperture S/N favours extended sources (high pixel sum)
+    # whereas DAO peak favours compact PSF sources — exactly the
+    # discrimination we want for SN identification.  The multi-band criterion
+    # was already applied as a FILTER; the selector should be peak.
+    verified.sort(key=lambda v: v["max_peak"], reverse=True)
+    brightest = verified[0]
+
+    if brightest["sep_host"] > HOST_NEAR_AS:
+        best = brightest
+    else:
+        n_near = sum(1 for v in verified if v["sep_host"] < NEAR_HOST_AS)
+        off_host = [v for v in verified if v["sep_host"] > NEAR_HOST_AS]
+        if (n_near >= 2 and off_host and
+            off_host[0]["max_peak"] > OFF_HOST_RATIO * brightest["max_peak"]):
+            best = off_host[0]
+        else:
+            best = brightest
+
+    moved = float(SkyCoord(host_ra, host_dec, unit="deg").separation(
+                  SkyCoord(best["ra"], best["dec"], unit="deg")).to(u.arcsec).value)
+    return dict(success=True,
+                sn_ra=best["ra"], sn_dec=best["dec"],
+                n_candidates=len(verified),
+                peak=best["max_peak"],
+                max_snr=best["max_snr"],
+                n_3sig=best["n_3sig"],
+                moved_arcsec=moved)
+
+
 def find_sn_via_dao(sci_path, hint_ra, hint_dec, psf_fwhm_arcsec=0.1,
                     search_arcsec=2.5, threshold_sigma=5.0,
                     host_ra=None, host_dec=None, host_mask_arcsec=0.3):
@@ -654,6 +865,11 @@ def main():
         print(f"\n==== ID={src['id']} seq={seqn} ====", flush=True)
         # --- Optional DAO point-source refinement (BEFORE pos/cut) ---
         if args.find_sn:
+            # v18: REVERT TO v15 single-band DAO for selection.
+            # The multi-band DAO attempt (v17) added candidates that broke
+            # v15's structural heuristic for known-correct cases.
+            # Multi-band info is captured as a per-CSV-row QUALITY FLAG only
+            # (computed below from the per-band photometry that's already done).
             tel = src.get("telescope", "JWST").strip().upper()
             entry = DETECT_BAND.get(tel)
             if entry is None:
@@ -663,8 +879,8 @@ def main():
                 fwhm_arcsec, path_fn = entry
                 det_path = path_fn(src)
                 if det_path is None or not Path(det_path).exists():
-                    print(f"  DAO: detection file missing ({det_path}); "
-                          f"keeping hint", flush=True)
+                    print(f"  DAO: detection file missing; keeping hint",
+                          flush=True)
                 else:
                     r = find_sn_via_dao(det_path, src["sn_ra"], src["sn_dec"],
                                         psf_fwhm_arcsec=fwhm_arcsec,
@@ -766,8 +982,36 @@ def main():
             row["best_band"] = best_band
             row["best_snr"]  = round(best_snr, 2)
             row["combined_sigma"] = round(best_snr, 2)  # for HST SN, dominated by F814W
+
+            # v18: multi-band quality flag from the user's criterion.
+            # JWST   -> max(snr_F115W..F444W) >= 5 AND n_above_3sig >= 3
+            # EUCLID -> max(snr_Y,J,H) >= 5 AND n_above_3sig >= 2 (3 bands only)
+            # HST    -> snr_F814W >= 5  (single-band exception)
+            telescope_uc = row["telescope"].strip().upper()
+            if telescope_uc == "HST":
+                bands_for_q = ["F814W"]
+                req_3sig = 1
+            elif telescope_uc in ("EUCLID","EUCLID-NISP","NISP"):
+                bands_for_q = ["Y","J","H"]
+                req_3sig = 2
+            else:  # JWST or fallback
+                bands_for_q = ["F115W","F150W","F277W","F444W"]
+                req_3sig = 3
+            snrs_q = [float(row.get(f"snr_{b}", 0)) for b in bands_for_q]
+            max_snr = max(snrs_q) if snrs_q else 0.0
+            n_3sig  = sum(1 for s in snrs_q if s >= 3.0)
+            if max_snr >= 5.0 and n_3sig >= req_3sig:
+                quality = "real"
+            elif max_snr >= 3.0:
+                quality = "marginal"
+            else:
+                quality = "spurious"
+            row["max_snr_detect"]  = round(max_snr, 2)
+            row["n_3sig_detect"]   = n_3sig
+            row["quality_flag"]    = quality
             phot_rows.append(row)
-            print(f"  photometry: best={best_band}@{best_snr:.1f}σ", flush=True)
+            print(f"  photometry: best={best_band}@{best_snr:.1f}σ  "
+                  f"quality={quality} (max={max_snr:.1f}σ, n3σ={n_3sig})", flush=True)
 
     # Write CSV with extended schema (added 2026-05-26):
     #   * hst/jwst/euclid tile numbers (self-documenting — no external
@@ -780,6 +1024,7 @@ def main():
                 "host_ra","host_dec","sn_ra","sn_dec","sn_host_sep_arcsec",
                 "host_z",
                 "best_band","best_snr","combined_sigma",
+                "max_snr_detect","n_3sig_detect","quality_flag",
                 "mag_F814W","mag_VIS","mag_Y","mag_J","mag_H",
                 "mag_F115W","mag_F150W","mag_F277W","mag_F444W",
                 "snr_F814W","snr_VIS","snr_Y","snr_J","snr_H",
