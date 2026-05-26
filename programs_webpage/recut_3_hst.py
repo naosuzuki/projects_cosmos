@@ -35,13 +35,22 @@ SOURCES = [
     # The v05 PNGs at seq 0003/0004/0005 are preserved in v05/.
     dict(id=130972, seq=1, sn_ra=150.279695, sn_dec=2.041101,
          hst="052", jwst="A4",  euclid="101542818",
-         host_ra=150.279917, host_dec=2.041285),
+         host_ra=150.279917, host_dec=2.041285,
+         telescope="HST"),
     dict(id=371996, seq=2, sn_ra=150.282844, sn_dec=1.932259,
          hst="040", jwst="A10", euclid="101542818",
-         host_ra=150.282612, host_dec=1.932054),
+         host_ra=150.282612, host_dec=1.932054,
+         telescope="HST"),
     dict(id=471959, seq=3, sn_ra=150.278904, sn_dec=2.430962,
          hst="076", jwst="B3",  euclid="101545698",
-         host_ra=150.278761, host_dec=2.430970),
+         host_ra=150.278761, host_dec=2.430970,
+         telescope="HST"),
+    # Euclid NISP-only SN; NISP-H centroid 0.04" from catalog → SN essentially
+    # at host position (transient sits on top of host in NISP).
+    dict(id=63924,  seq=4, sn_ra=149.968179, sn_dec=2.233132,
+         hst="066", jwst="A2",  euclid="101544256",
+         host_ra=149.968173, host_dec=2.233122,
+         telescope="EUCLID"),
 ]
 
 # Aperture-photometry constants (must match measure_sn_5.py)
@@ -363,7 +372,8 @@ def main():
         # Aperture photometry (--measure).  Re-uses the same FITS_CACHE so
         # the per-band file is already open from the cut() calls above.
         if args.measure:
-            row = dict(id=src["id"], telescope="HST",
+            row = dict(id=src["id"],
+                       telescope=src.get("telescope", "HST"),
                        host_ra=src.get("host_ra", src["sn_ra"]),
                        host_dec=src.get("host_dec", src["sn_dec"]),
                        sn_ra=src["sn_ra"], sn_dec=src["sn_dec"])

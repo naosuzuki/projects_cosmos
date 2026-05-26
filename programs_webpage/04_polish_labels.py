@@ -291,11 +291,20 @@ def process_source(cid, row, list_name, seq, out_dir):
     sn_mags   = {b: row.get(f"mag_{b}", -1.0) for b in
                  ("F814W","VIS","Y","J","H","F115W","F150W","F277W","F444W")}
 
-    # Telescope from CSV.  If 'JWST' -> detection panels are jwst1/jwst2.
-    # If 'HST' -> detection panel is hst.  Default JWST for back-compat.
+    # Telescope from CSV.  Detection panel(s) per source type:
+    #   JWST           -> jwst1 + jwst2 (both NIRCam combos are detection)
+    #   HST            -> hst
+    #   EUCLID / NISP  -> eunisp (Euclid NISP-only SN: VIS at different epoch
+    #                              shows host only, NISP shows SN excess)
+    #   EUCLID-VIS     -> euvis  (Euclid VIS-only SN — for future use)
+    # Default JWST for back-compat.
     telescope = str(row.get("telescope", "JWST")).strip().upper()
     if telescope == "HST":
         det_panels_for_this_source = {"hst"}
+    elif telescope in ("EUCLID", "NISP", "EUCLID-NISP"):
+        det_panels_for_this_source = {"eunisp"}
+    elif telescope in ("EUCLID-VIS", "VIS"):
+        det_panels_for_this_source = {"euvis"}
     else:
         det_panels_for_this_source = {"jwst1", "jwst2"}
 
