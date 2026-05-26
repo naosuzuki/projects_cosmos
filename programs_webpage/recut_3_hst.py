@@ -392,6 +392,150 @@ def _run_dao_candidates(sci_path, hint_ra, hint_dec, psf_fwhm_arcsec,
         return []
 
 
+# ─────────────────────────────────────────────────────────────────────
+# v20: PRIORITY 1 = PSF morphology in highest-S/N band.
+#
+# v19 used a "highest-peak band" or "ALL bands" rule for the PSF check
+# and they both failed in different ways.  The user's correct
+# specification: trust the morphology measurement IN THE HIGHEST-S/N
+# BAND (most reliable measurement), and ONLY that band.
+#
+# Algorithm:
+#   precursor:  aper photometry in every telescope band → snrs dict
+#   PRIORITY 1: in the highest-S/N band, find this candidate's DAO
+#               detection.  If none → reject (not compact in best band).
+#               If exists → check sharp/rnd1.  Reject if not PSF-like.
+#   PRIORITY 2: max_snr >= 5σ  AND  n bands >= 3σ  (1 for HST, 2 otherwise)
+#   PRIORITY 3: sort survivors by max_snr, pick highest.
+#
+# To support "highest-S/N band morphology", DAO is now run in EVERY
+# telescope band (not just 2).  Adds ~60 ms per source — negligible.
+# ─────────────────────────────────────────────────────────────────────
+
+# Per-telescope DAO band list (same as VERIFY_BANDS plus per-band fwhm).
+ALL_BAND_DAO = {
+    "HST":         [("F814W", _hst_path_fn,                      0.134, "hst")],
+    "JWST":        [("F115W", _jwst_band_path_fn("f115w"),       0.057, "jwst"),
+                    ("F150W", _jwst_band_path_fn("f150w"),       0.057, "jwst"),
+                    ("F277W", _jwst_band_path_fn("f277w"),       0.130, "jwst"),
+                    ("F444W", _jwst_band_path_fn("f444w"),       0.160, "jwst")],
+    "EUCLID":      [("NIR-Y", _eu_band_path_fn("NIR-Y"),         0.524, "euclid"),
+                    ("NIR-J", _eu_band_path_fn("NIR-J"),         0.537, "euclid"),
+                    ("NIR-H", _eu_band_path_fn("NIR-H"),         0.567, "euclid")],
+    "EUCLID-NISP": [("NIR-Y", _eu_band_path_fn("NIR-Y"),         0.524, "euclid"),
+                    ("NIR-J", _eu_band_path_fn("NIR-J"),         0.537, "euclid"),
+                    ("NIR-H", _eu_band_path_fn("NIR-H"),         0.567, "euclid")],
+    "NISP":        [("NIR-Y", _eu_band_path_fn("NIR-Y"),         0.524, "euclid"),
+                    ("NIR-J", _eu_band_path_fn("NIR-J"),         0.537, "euclid"),
+                    ("NIR-H", _eu_band_path_fn("NIR-H"),         0.567, "euclid")],
+}
+
+
+def find_sn_via_v20(src, host_ra, host_dec,
+                    search_arcsec=2.5,
+                    dao_threshold_sigma=3.0,
+                    anchor_sigma=5.0,
+                    min_n_above_3sig=2,
+                    dedupe_arcsec=0.15,
+                    psf_sharp_min=0.30, psf_sharp_max=1.50,
+                    psf_rnd1_max_abs=0.40):
+    """v20: PSF gate IN HIGHEST-S/N BAND only.
+
+    Returns dict with success, sn_ra, sn_dec, n_candidates, peak, max_snr,
+    n_3sig, moved_arcsec, sharp, rnd1, best_snr_band.
+    """
+    telescope = src.get("telescope", "JWST").strip().upper()
+    band_set = ALL_BAND_DAO.get(telescope)
+    if band_set is None:
+        return _dao_fail(host_ra, host_dec)
+    is_single_band = (len(band_set) == 1)
+    req_n_3sig = 1 if is_single_band else min_n_above_3sig
+
+    # ── DAO in EVERY telescope band ──
+    all_cands = []
+    for band, path_fn, fwhm_arc, kind in band_set:
+        sci_path = path_fn(src)
+        if sci_path is None or not Path(sci_path).exists(): continue
+        for c in _run_dao_candidates(sci_path, host_ra, host_dec, fwhm_arc,
+                                     search_arcsec, dao_threshold_sigma):
+            c["band"] = band; c["kind"] = kind; c["fwhm_arc"] = fwhm_arc
+            all_cands.append(c)
+    if not all_cands:
+        return _dao_fail(host_ra, host_dec)
+
+    # ── Dedupe across bands ──
+    unique = []
+    for c in all_cands:
+        merged = False
+        for u_entry in unique:
+            sep = SkyCoord(c["ra"], c["dec"], unit="deg").separation(
+                  SkyCoord(u_entry["ra"], u_entry["dec"], unit="deg")
+                  ).to(u.arcsec).value
+            if sep < dedupe_arcsec:
+                u_entry["detections"].append(c)
+                merged = True
+                break
+        if not merged:
+            unique.append(dict(ra=c["ra"], dec=c["dec"], detections=[c]))
+
+    # ── Precursor: aper S/N in every band for every candidate ──
+    for u_entry in unique:
+        snrs = {}
+        for band, path_fn, fwhm_arc, kind in band_set:
+            sp = path_fn(src)
+            if sp is None or not Path(sp).exists(): continue
+            mag, snr = aper_photometry(sp, None, kind, u_entry["ra"], u_entry["dec"])
+            snrs[band] = float(snr) if snr else 0.0
+        u_entry["snrs"]    = snrs
+        u_entry["max_snr"] = max(snrs.values()) if snrs else 0.0
+        u_entry["n_3sig"]  = sum(1 for s in snrs.values() if s >= 3.0)
+        u_entry["best_snr_band"] = max(snrs, key=snrs.get) if snrs else None
+
+    # ── PRIORITY 1: PSF morphology in highest-S/N band — THE GATEKEEPER ──
+    psf_passing = []
+    for u_entry in unique:
+        best_band = u_entry["best_snr_band"]
+        if best_band is None: continue  # no S/N → can't check morphology
+        # Find DAO detection of this candidate in the highest-S/N band
+        dao_in_best = next(
+            (d for d in u_entry["detections"] if d["band"] == best_band), None)
+        if dao_in_best is None:
+            continue  # not detected as compact in best-S/N band → REJECT
+        sharp_ok = psf_sharp_min < dao_in_best["sharp"] < psf_sharp_max
+        rnd_ok   = abs(dao_in_best["rnd1"]) < psf_rnd1_max_abs
+        if not (sharp_ok and rnd_ok):
+            continue  # morphology in best-S/N band fails PSF check → REJECT
+        u_entry["best_sharp"] = dao_in_best["sharp"]
+        u_entry["best_rnd1"]  = dao_in_best["rnd1"]
+        u_entry["best_peak"]  = max(d["peak"] for d in u_entry["detections"])
+        psf_passing.append(u_entry)
+    if not psf_passing:
+        return _dao_fail(host_ra, host_dec, n=len(unique))
+
+    # ── PRIORITY 2: multi-band S/N criterion ──
+    real_sn = [u_entry for u_entry in psf_passing
+               if u_entry["max_snr"] >= anchor_sigma
+                  and u_entry["n_3sig"] >= req_n_3sig]
+    if not real_sn:
+        return _dao_fail(host_ra, host_dec, n=len(psf_passing))
+
+    # ── PRIORITY 3: pick brightest by max aper S/N ──
+    real_sn.sort(key=lambda u_entry: u_entry["max_snr"], reverse=True)
+    best = real_sn[0]
+    moved = float(SkyCoord(host_ra, host_dec, unit="deg").separation(
+                  SkyCoord(best["ra"], best["dec"], unit="deg")).to(u.arcsec).value)
+    return dict(success=True,
+                sn_ra=best["ra"], sn_dec=best["dec"],
+                n_candidates=len(real_sn),
+                peak=best["best_peak"],
+                max_snr=best["max_snr"],
+                n_3sig=best["n_3sig"],
+                moved_arcsec=moved,
+                sharp=best["best_sharp"],
+                rnd1=best["best_rnd1"],
+                best_snr_band=best["best_snr_band"])
+
+
 def find_sn_via_multiband_dao_v19(src, host_ra, host_dec,
                                   search_arcsec=2.5,
                                   dao_threshold_sigma=3.0,
@@ -990,27 +1134,27 @@ def main():
         print(f"\n==== ID={src['id']} seq={seqn} ====", flush=True)
         # --- Optional DAO point-source refinement (BEFORE pos/cut) ---
         if args.find_sn:
-            # v19: PSF-first multi-band detector.
-            # See find_sn_via_multiband_dao_v19 for the algorithm.
+            # v20: PSF morphology in HIGHEST-S/N band is the gatekeeper.
             tel = src.get("telescope", "JWST").strip().upper()
             host_ra_s  = src.get("host_ra",  src["sn_ra"])
             host_dec_s = src.get("host_dec", src["sn_dec"])
-            r = find_sn_via_multiband_dao_v19(
+            r = find_sn_via_v20(
                 src, host_ra_s, host_dec_s,
                 search_arcsec=args.search_arcsec,
-                dao_threshold_sigma=3.0,    # LOW threshold to catch faint SN
-                anchor_sigma=5.0,           # at least one band must hit this
-                min_n_above_3sig=2,         # at least 2 bands >= 3σ
+                dao_threshold_sigma=3.0,
+                anchor_sigma=5.0,
+                min_n_above_3sig=2,
             )
             flag = "OK " if r["success"] else "no PSF-like real candidate"
             extra = ""
             if r["success"]:
-                extra = (f"  max_snr={r.get('max_snr', 0):.1f}σ  "
+                extra = (f"  best_band={r.get('best_snr_band','?'):<5s}  "
+                         f"max_snr={r.get('max_snr', 0):.1f}σ  "
                          f"n3σ={r.get('n_3sig', 0)}  "
                          f"sharp={r.get('sharp', 0):.2f} rnd1={r.get('rnd1', 0):+.2f}")
-            print(f"  DAO-v19 ({tel}): {flag}  "
+            print(f"  DAO-v20 ({tel}): {flag}  "
                   f"moved={r['moved_arcsec']:.2f}\"  "
-                  f"real_PSF_candidates={r['n_candidates']}{extra}", flush=True)
+                  f"real_SN_candidates={r['n_candidates']}{extra}", flush=True)
             if r["success"]:
                 src["sn_ra"]  = r["sn_ra"]
                 src["sn_dec"] = r["sn_dec"]
