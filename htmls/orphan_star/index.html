@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<title>Orphan-star project — version index</title>
+<style>
+body { font-family: serif; margin: 0; padding: 0; background: #fafafa; }
+.wrap { max-width: 800px; margin: 0 auto; padding: 20px; }
+h1 { margin-bottom: 4px; }
+.subtitle { color: #666; font-style: italic; margin-bottom: 20px; }
+.ver { padding: 12px 0; border-bottom: 1px solid #ddd; }
+.ver a { text-decoration: none; font-weight: bold; color: #1a5; font-size: 17px; }
+.ver a:hover { text-decoration: underline; }
+.meta { color: #888; font-size: 13px; }
+.back { font-size: 13px; color: #666; }
+.coming { color: #999; font-style: italic; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="back"><a href="../index.html">&larr; all decks</a></p>
+<h1>Orphan-star project</h1>
+<p class="subtitle">Versions of the orphan-star candidate decks.  Each version
+is a snapshot so we can compare progress across analysis revisions.</p>
+
+<div class="ver">
+  <a href="v01/index.html">v01</a> &nbsp; <span class="meta">built 2026-05-24 &mdash; 1,673 candidates total (585 + 354 + 734)</span>
+  <p>Pre-revision baseline.  Catalog cross-match with 1&Prime; radius;
+  uses occupancy-based JWST footprint mask; treats any catalog match as
+  a counterpart regardless of star/galaxy class.</p>
+  <p class="meta">User-identified issues (Points 1&ndash;5): footprint vs
+  image data, saturation gate, morphology cuts, mag-dependent PM
+  tolerance, isolated-SN recovery.</p>
+</div>
+
+<div class="ver">
+  <span class="coming">v02 &mdash; coming after revision</span>
+  <p class="meta">Will incorporate the 5 fixes above.</p>
+</div>
+
+</div>
+</body>
+</html>

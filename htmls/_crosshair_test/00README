@@ -1,0 +1,148 @@
+================================================================
+  _crosshair_test/ — version history of the SN crosshair iteration
+================================================================
+
+This directory holds historical snapshots of the SN-crosshair / cutout
+PNG work.  Each version is a stage in the iteration; we keep them all
+so we can compare progress and never lose context for an earlier
+result.
+
+Open index.html at this directory for a clickable version listing.
+
+----------------------------------------------------------------
+  v01 — first debug image                              May 24 14:10
+----------------------------------------------------------------
+  Single PNG: DEBUG_jwst1.png
+
+  WHAT:   Earliest "can matplotlib draw a crosshair on a cutout"
+          experiment.  No labels, no layout work — just a JWST RGB
+          panel with a crosshair overlay to verify the basic
+          rendering pipeline.
+
+  WHY:    Confirmed the toolchain (astropy Cutout2D → matplotlib
+          imshow → savefig PNG) works end-to-end.
+
+  STATUS: Throwaway.  Kept as the historical zero-point.
+
+----------------------------------------------------------------
+  v02 — crosshair test on 1 source (known34_0023)      May 24 15:04
+----------------------------------------------------------------
+  5 PNGs for a single source, 5 panel types:
+    crosshair_known34_0023_{hst, euvis, eunisp, jwst1, jwst2}.png
+
+  WHAT:   First clean 5-panel set for one SN.  Used the known34_sn.fits
+          reference, picked the seq=0023 row.  Drew a full crosshair
+          (4-arm '+') centered on the catalog source position.
+
+  WHY:    Validated the full per-source layout: HST F814W, Euclid VIS,
+          Euclid NISP YJH (RGB), JWST F115/150/277 (RGB), JWST
+          F150/277/444 (RGB).  Same crosshair style on every panel.
+
+  KNOWN ISSUE: Full crosshair sits on top of host galaxy → obscures
+          the SN photometry zone.  Motivated the v03 redesign.
+
+----------------------------------------------------------------
+  v03 — refined crosshair test (known34c_0001)          May 24 16:04
+----------------------------------------------------------------
+  5 PNGs:  crosshair_known34c_0001_{hst, euvis, eunisp, jwst1, jwst2}.png
+
+  WHAT:   Same single-source test but with two design changes:
+          (a) Renamed tag from "known34" to "known34c" to mark a
+              corrected / curated iteration.
+          (b) Crosshair switched to a 4-case PARTIAL style: the arms
+              that would land on the host galaxy are dropped; only the
+              arms pointing AWAY from host are drawn.  This way the
+              SN itself is never obscured.
+          (c) Solid-line style for the detection panel, dashed for
+              the non-detection panels (Task #42 in the task list).
+
+  WHY:    Made the crosshair informative without hiding the data it
+          is pointing at.
+
+  STATUS: Crosshair style finalised here; remained the convention
+          for v04.
+
+----------------------------------------------------------------
+  v04 — polished 5-source set                          May 25 23:57
+----------------------------------------------------------------
+  25 PNGs:  polished_<id>_{hst, euvis, eunisp, jwst1, jwst2}.png
+            for id ∈ {318858, 320233, 130972, 371996, 471959}
+
+  WHAT:   First "publication-style" set.  Added a full polish layer:
+            - 4-corner labels: top-left = ID + photo-z + SN sigma;
+              top-left line 2 = survey + filter + host mag;
+              bottom-left = SN mag line; bottom-right = 1″ scale bar
+            - SN sigma label only on JWST panels (best-band σ)
+            - Combined-σ cap at 50σ
+            - SN-line hidden on non-detection panels
+            - Host-mag suffix dropped when value unavailable
+            - JWST cutouts rotated to North-up (compute roll from WCS)
+            - SCI+ERR HDU access switched to v1.0 i2d for proper SNR
+            - Aperture photometry: simple aper − host − ring-σ
+            - All 5 spotlight SN (Point-5 user reference list) included
+
+  WHY:    Intended as the final deliverable for the orphan-SN
+          eyeball-validation deck.
+
+  KNOWN ISSUE (BIG ONE): HST SN positions for the three HST-detected
+          cases (130972, 371996, 471959) were WRONG.  We used
+          user-supplied eyeball offsets verbatim instead of measuring
+          the actual SN centroid.  The crosshair is offset 0.2–1.4″
+          from the true SN in each case.  See v05.
+
+----------------------------------------------------------------
+  v05 — measured HST SN positions, simple crosshair    May 26 03:42
+----------------------------------------------------------------
+  15 PNGs:  sn_known34c_{0003, 0004, 0005}_{hst, euclid_vis,
+                                            euclid_nisp, jwst1, jwst2}.png
+            seq 0003 = ID 130972
+            seq 0004 = ID 371996
+            seq 0005 = ID 471959
+
+  WHAT:   HST-only verification pass after the v04 position bug.
+            - Opened each HST F814W tile, took a 1.0–1.5″ box around
+              the user's refined eyeball hint
+            - Ran a 2D-Gaussian-smoothed centroid (peak + intensity-
+              weighted moments) to find the true SN position
+            - All three measured positions landed within 0.05–0.18″
+              of the user's eyeball hint (confirming the hint was a
+              reasonable starting point, and that the centroid found
+              the SN, not the host)
+            - Re-cut all 5 panels per source at the MEASURED position
+            - Added a simple green '+' crosshair at the cutout
+              center (= measured SN position)
+            - No polish labels (focused on validating position before
+              re-doing the full label layer)
+
+          Measured positions:
+            130972  RA=150.279695  Dec=2.041101
+            371996  RA=150.282844  Dec=1.932259
+            471959  RA=150.278904  Dec=2.430962
+
+  WHY:    Quick visual gate before the next polished iteration.
+
+  PERFORMANCE NOTE: Whole 15-PNG re-cut ran in 22 seconds (vs.
+          ~10–15 min on the v04 run) thanks to two script fixes:
+            (1) Cutout2D slice BEFORE astype, so only the 80KB box
+                is read from disk, not the full 500MB-30GB tile.
+            (2) FITS handle caching by path (Euclid tile 101542818
+                is shared by 130972 and 371996).
+          Also benefited from OS page cache being warmed by the
+          preceding centroid step.
+
+  SCOPE:  Only the 3 HST SN.  JWST-only IDs (318858, 320233) and
+          Euclid NISP-only ID (63924) were not re-cut in this round;
+          their v04 versions remain authoritative until the next pass.
+
+----------------------------------------------------------------
+  Forward path (NOT in this directory yet)
+----------------------------------------------------------------
+  v06 (planned): re-do the full polish layer on top of the v05
+                 measured positions.  All 5 spotlight SN + 4-corner
+                 labels + 1″ scale bar + partial crosshair.
+
+  Generation scripts:
+    recut_3_hst.py            — v05 (this directory's latest)
+    recut_5_clean.py          — v04 source
+    04_polish_labels.py       — polish layer used by v04
+    All under /Users/suzuki/github/projects_cosmos/programs_webpage/
