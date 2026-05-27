@@ -253,3 +253,21 @@ but `pmtot_HST_Euclid_NISP = 5.7`). Centroid / sign convention may
 differ between the cat positions and the PM-fit positions. Audit the
 `56_step7_proper_motion.py` / `57_step7_pm_v2.py` centroids vs the
 `cat_ra/cat_dec` values used in `59_master_or_catalog.py`.
+
+### B6. PM info is COPIED to all colliding-hst_id rows (consequence of B1)
+`59_master_or_catalog.py` lines 442-456 join PM values from
+`refined_<pair>_with_pm_v02.parquet` by `hst_id_hst` only.  Because
+B1 says `hst_id` is per-tile (not globally unique), the SAME pmtot
+value is attached to ALL master rows sharing that hst_id, regardless
+of whether they are the same physical source.
+
+Concrete case (cand_65 inspection, 2026-05-27):
+  - HSTID_105 has **84** rows in master.
+  - Row idx=13938: real star, RA=149.7615, Dec=1.6372,
+    cat_class_star=0.989, mag_F814W=19.63 → real PM 8.52 mas/yr.
+  - Row idx=17575: galaxy, RA=149.832, Dec=1.715 (378″ away from idx=13938),
+    cat_class_star=0.0009, mag_F814W=22.57 → wrongly carries pmtot=8.52.
+
+**Fix in v02 master:** join PM info by `(hst_id, hst_tile)` tuple, not
+`hst_id` alone.  Or first deduplicate hst rows by adding a globally
+unique `hst_uid = f"{tile}_{hst_id}"` column and join on that.
