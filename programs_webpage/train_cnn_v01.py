@@ -38,17 +38,14 @@ OUT_JSON = CSV_DIR / "cnn_thresholds_v01.json"
 STATUS_LOG = CSV_DIR / "run_v01_status.log"
 
 EPOCHS = 30
-BATCH = 64
+BATCH = 256          # MPS prefers larger batches
 LR = 1e-3
-TARGET_FPR = 1e-3   # threshold tuned to keep negatives' false-positive rate ≤ 0.1%
+TARGET_FPR = 1e-3
 
 
 def log(msg):
-    t = time.strftime('%Y-%m-%d %H:%M:%S')
-    line = f"[{t}] {msg}"
-    print(line, flush=True)
-    with STATUS_LOG.open("a") as f:
-        f.write(line + "\n")
+    """Print only — orchestrator handles file logging."""
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 
 def per_channel_stats(X, frac_finite_min=0.5):

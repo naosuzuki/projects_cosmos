@@ -1,82 +1,60 @@
-"""Step 6 v01: inference at 1.12M scale + CSV + webpage.
+"""Step 6 v01 (parallel + MPS): inference at 1.12M scale.
 
-Inputs:
-  csvfiles_sn/sn_candidates_v01.parquet
-  csvfiles_sn/fits_lookup_v01.parquet
-  csvfiles_sn/cnn_models_v01.pt        (state dicts + thresholds)
+PARALLELISED via multiprocessing.Pool — one worker per survey
+(hst / jwst / vis / nisp). Each worker:
+  - loads its CNN onto MPS (independent context)
+  - iterates over its survey's tiles in a tile-major loop
+  - extracts cutouts + runs CNN forward pass in batched MPS calls
+  - returns per-source P + aperture photometry per band
+
+The 4 surveys run truly in parallel (1 process each, separate MPS contexts).
+On a Mac Mini Apple Silicon the GPU is shared, so the 4 processes will queue
+at the GPU driver — but their IO + CPU overlap. Net: ~2-4× speedup vs serial.
 
 Outputs:
-  csvfiles_sn/tbl_sn_candidates_v01.csv
-  csvfiles_sn/sn_candidates_v01_all_scored.parquet   (per-source scores for all 1.12M)
-  htmls/sn_search/v01/  (top-N webpage with cutout PNGs)
-
-Tile-major inner loop:
-  For each (survey, tile):
-    open the relevant FITS files once (HST=1 band, JWST=4 bands, VIS=1, NISP=3)
-    extract 64×64 cutouts for every candidate in that tile, sorted by Y pix
-    run CNN inference per survey
-    compute simple aperture photometry for each band
-    accumulate per-source result
-  After all tiles: combine per-survey probs and apply the 1-of-4 detection rule.
-
-The single most expensive part is the cutout slicing. Cutout = small (16KB)
-slice from a memmapped FITS — with sources sorted by Y pix the OS page cache
-gives near-RAM-speed reads. CNN inference is batched per tile.
+  csvfiles_sn/tbl_sn_candidates_v01.csv             (v32-schema candidates only)
+  csvfiles_sn/sn_candidates_v01_all_scored.parquet  (per-source scores for ALL)
+  htmls/sn_search/v01/index.html                    (top-N webpage)
 """
 import warnings; warnings.filterwarnings("ignore")
-import sys, time, os, json, math, csv, gc
+import sys, time, os, csv, math, json
 from pathlib import Path
-from collections import defaultdict
+from multiprocessing import Pool, set_start_method
 import numpy as np
 import pyarrow.parquet as pq
 import pyarrow as pa
-from astropy.io import fits
-from astropy.wcs import WCS
-import torch
 
 sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
 import recut_3_hst as R
-from cnn_models_v01 import SmallCNN, best_device
 
-CSV_DIR = Path("/Users/suzuki/github/projects_cosmos/csvfiles_sn")
+CSV_DIR  = Path("/Users/suzuki/github/projects_cosmos/csvfiles_sn")
 HTML_DIR = Path("/Users/suzuki/github/projects_cosmos/htmls/sn_search/v01")
-CAND = CSV_DIR / "sn_candidates_v01.parquet"
-LOOK = CSV_DIR / "fits_lookup_v01.parquet"
-MODELS = CSV_DIR / "cnn_models_v01.pt"
-OUT_CSV = CSV_DIR / "tbl_sn_candidates_v01.csv"
+LOOK     = CSV_DIR / "fits_lookup_v01.parquet"
+MODELS   = CSV_DIR / "cnn_models_v01.pt"
+OUT_CSV  = CSV_DIR / "tbl_sn_candidates_v01.csv"
 OUT_PARQ = CSV_DIR / "sn_candidates_v01_all_scored.parquet"
-STATUS_LOG = CSV_DIR / "run_v01_status.log"
 
-CUT_PIX = 64
-BATCH_CNN = 256
-TOP_N_WEB = 500
+CUT_PIX     = 64
+BATCH_CNN   = 1024     # larger batches for MPS
+TOP_N_WEB   = 500
 
-# Band specs (survey, band_label, R_band)
 HST_BANDS  = [("F814W","F814W")]
 JWST_BANDS = [("F115W","f115w"),("F150W","f150w"),("F277W","f277w"),("F444W","f444w")]
 VIS_BANDS  = [("VIS","VIS")]
 NISP_BANDS = [("Y","NIR-Y"),("J","NIR-J"),("H","NIR-H")]
 
-# PSF FWHM (arcsec) per band — for aperture photometry sizing
 FWHM_AS = {"F814W":0.134, "F115W":0.057, "F150W":0.057, "F277W":0.130, "F444W":0.160,
            "VIS":0.194, "Y":0.524, "J":0.537, "H":0.567}
 
-# Order of bands in the CSV per the v32 schema
 CSV_BANDS = ["F814W","VIS","Y","J","H","F115W","F150W","F277W","F444W"]
 
 
 def log(msg):
-    t = time.strftime('%Y-%m-%d %H:%M:%S')
-    line = f"[{t}] {msg}"
-    print(line, flush=True)
-    with STATUS_LOG.open("a") as f:
-        f.write(line + "\n")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 
-def cutout_and_aper(sci_hdu, wcs, ra, dec, fwhm_as, n=CUT_PIX, kind="jwst"):
-    """Return (cutout_64x64_float32, mag_aper, snr_aper).
-    Aperture: r=1·FWHM, sky ring 2·–3.5·FWHM, all at native scale.
-    NaN-fill cutout if out of bounds; (-1, 0) for mag/snr if can't measure."""
+# -------- shared helpers (used in workers) --------
+def cutout_and_aper(sci_data, hdr, wcs, ra, dec, fwhm_as, kind, n=CUT_PIX):
     try:
         sx, sy = wcs.all_world2pix(ra, dec, 0)
     except Exception:
@@ -87,7 +65,7 @@ def cutout_and_aper(sci_hdu, wcs, ra, dec, fwhm_as, n=CUT_PIX, kind="jwst"):
     ps = float(np.sqrt(np.abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600.0
     half = n // 2
     cx = int(round(sx)); cy = int(round(sy))
-    ny, nx = sci_hdu.data.shape[-2:]
+    ny, nx = sci_data.shape[-2:]
     x0 = cx - half; x1 = x0 + n
     y0 = cy - half; y1 = y0 + n
     cutout = np.full((n, n), np.nan, dtype=np.float32)
@@ -97,14 +75,12 @@ def cutout_and_aper(sci_hdu, wcs, ra, dec, fwhm_as, n=CUT_PIX, kind="jwst"):
         src_x0 = max(0, x0); src_y0 = max(0, y0)
         src_x1 = min(nx, x1); src_y1 = min(ny, y1)
         if src_x1 > src_x0 and src_y1 > src_y0:
-            cutout[ys0:ys1, xs0:xs1] = sci_hdu.data[src_y0:src_y1, src_x0:src_x1].astype(np.float32)
-    # aperture photometry on the cutout
+            cutout[ys0:ys1, xs0:xs1] = sci_data[src_y0:src_y1, src_x0:src_x1].astype(np.float32)
     if not np.any(np.isfinite(cutout)):
         return cutout, -1.0, 0.0
     sub = np.where(np.isfinite(cutout), cutout, 0.0).astype(np.float64)
-    cy_p = (sy - (cy - half))   # subpixel offset within cutout
+    cy_p = (sy - (cy - half))
     cx_p = (sx - (cx - half))
-    aper_px = max(1.0, FWHM_AS.get("DEFAULT", fwhm_as) / ps)
     aper_r = fwhm_as / ps
     ring_in = 2.0 * fwhm_as / ps
     ring_out = 3.5 * fwhm_as / ps
@@ -120,8 +96,6 @@ def cutout_and_aper(sci_hdu, wcs, ra, dec, fwhm_as, n=CUT_PIX, kind="jwst"):
     flux = float(np.nansum(sub2[in_aper]))
     sig = float(np.nanstd(sub[in_ring])) * math.sqrt(n_aper)
     snr = flux / (sig + 1e-30)
-    # mag (AB)
-    hdr = sci_hdu.header
     bunit = (hdr.get("BUNIT") or "").strip()
     if kind == "jwst" or "MJy/sr" in bunit:
         pix_sr = hdr.get("PIXAR_SR") or ((ps / 206265.0) ** 2)
@@ -130,62 +104,147 @@ def cutout_and_aper(sci_hdu, wcs, ra, dec, fwhm_as, n=CUT_PIX, kind="jwst"):
     elif kind == "hst":
         zp = hdr.get("ABMAG_ZP") or hdr.get("ABMAGZP") or hdr.get("MAGZP") or 25.937
         mag = (float(zp) - 2.5 * math.log10(flux)) if flux > 0 else -1.0
-    else:  # euclid
+    else:
         zp = hdr.get("ZP") or hdr.get("MAGZP") or hdr.get("PHOTZP") or 23.9
         mag = (float(zp) - 2.5 * math.log10(flux)) if flux > 0 else -1.0
     return cutout, float(mag) if mag != -1.0 else -1.0, float(snr)
 
 
-def open_or_none(path):
-    if not path or not os.path.exists(path): return None, None
-    try:
-        h = R._open_cached(path)
-        sci_hdu = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
-        wcs = R._wcs_cached(path, sci_hdu)
-        return sci_hdu, wcs
-    except Exception as e:
-        log(f"  open failed: {Path(path).name}: {type(e).__name__}: {e}")
-        return None, None
+def survey_worker(args):
+    """Run inference for ONE entire survey in this process.
 
+    args = dict with:
+      survey, in_ch, model_state, norm_mean, norm_std
+      sources: list of (idx, ra, dec, tile)
+    Returns dict with:
+      survey, idxs (N,), P (N,), mag_dict (band -> (N,)), snr_dict (band -> (N,))
+    """
+    import warnings; warnings.filterwarnings("ignore")
+    import sys, os, math, time
+    sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+    import recut_3_hst as R_local
+    from astropy.io import fits
+    from astropy.wcs import WCS
+    import numpy as np
+    import torch
+    from cnn_models_v01 import SmallCNN
 
-def predict_batch(model, X, device):
+    survey = args["survey"]; in_ch = args["in_ch"]
+    sources = args["sources"]   # list of (idx, ra, dec, tile)
+    device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+
+    # load model
+    model = SmallCNN(in_ch=in_ch).to(device)
+    model.load_state_dict(args["model_state"])
+    model.set_norm(torch.tensor(args["norm_mean"], device=device),
+                   torch.tensor(args["norm_std"],  device=device))
     model.eval()
-    if len(X) == 0:
-        return np.zeros(0, dtype=np.float32)
-    out = np.zeros(len(X), dtype=np.float32)
-    with torch.no_grad():
-        for i in range(0, len(X), BATCH_CNN):
-            xb = torch.tensor(X[i:i+BATCH_CNN], dtype=torch.float32, device=device)
-            p = torch.sigmoid(model(xb)).cpu().numpy()
-            out[i:i+BATCH_CNN] = p
-    return out
+
+    if survey == "hst":   band_specs = HST_BANDS;  kind = "hst"
+    elif survey == "jwst": band_specs = JWST_BANDS; kind = "jwst"
+    elif survey == "vis":  band_specs = VIS_BANDS;  kind = "euclid"
+    elif survey == "nisp": band_specs = NISP_BANDS; kind = "euclid"
+    else: raise ValueError(survey)
+
+    # group sources by tile
+    from collections import defaultdict
+    by_tile = defaultdict(list)
+    for (idx, ra, dec, tile) in sources:
+        by_tile[tile].append((idx, ra, dec))
+
+    N_total = len(sources)
+    out_idx = np.full(N_total, -1, dtype=np.int64)
+    out_P   = np.full(N_total, np.nan, dtype=np.float32)
+    out_mag = {b: np.full(N_total, -1.0, dtype=np.float32) for (b, _) in band_specs}
+    out_snr = {b: np.full(N_total, 0.0,  dtype=np.float32) for (b, _) in band_specs}
+    has_band = {b: np.zeros(N_total, dtype=bool) for (b, _) in band_specs}
+
+    n_filled = 0
+    t0 = time.time()
+    for ti, (tile, tile_sources) in enumerate(sorted(by_tile.items())):
+        # Open all bands for this tile.
+        hdus = {}; wcss = {}; hdrs = {}
+        for blabel, R_band in band_specs:
+            if survey == "hst":
+                path = f"{R_local.HST_DIR}/acs_I_030mas_{tile}_sci.fits"
+            elif survey == "jwst":
+                path = R_local.resolve_jwst_path(tile, R_band.lower())
+            else:
+                path = R_local.resolve_euclid_path(tile, R_band)
+            if not path or not os.path.exists(path):
+                hdus[blabel] = None; continue
+            try:
+                h = fits.open(path, memmap=True)
+                sci_hdu = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
+                hdus[blabel] = sci_hdu
+                wcss[blabel] = WCS(sci_hdu.header)
+                hdrs[blabel] = sci_hdu.header
+            except Exception as e:
+                print(f"[{survey}] open failed {Path(path).name}: {e}", flush=True)
+                hdus[blabel] = None
+        ref_wcs = next((w for w in wcss.values() if w is not None), None)
+        if ref_wcs is None:
+            n_filled += len(tile_sources)
+            continue
+        # sort by pixel-Y
+        try:
+            ras = np.array([s[1] for s in tile_sources])
+            decs = np.array([s[2] for s in tile_sources])
+            _, ys = ref_wcs.all_world2pix(ras, decs, 0)
+            order = np.argsort(np.where(np.isfinite(ys), ys, 0.0))
+        except Exception:
+            order = np.arange(len(tile_sources))
+        ordered = [tile_sources[i] for i in order]
+        # batched inference over this tile
+        for batch_start in range(0, len(ordered), BATCH_CNN):
+            batch = ordered[batch_start:batch_start + BATCH_CNN]
+            cutouts = np.full((len(batch), in_ch, CUT_PIX, CUT_PIX), np.nan, dtype=np.float32)
+            for k, (gidx, ra_v, dec_v) in enumerate(batch):
+                for ci, (blabel, _) in enumerate(band_specs):
+                    if hdus[blabel] is None: continue
+                    c, mag, snr = cutout_and_aper(hdus[blabel].data, hdrs[blabel], wcss[blabel],
+                                                  ra_v, dec_v, FWHM_AS[blabel], kind=kind)
+                    cutouts[k, ci] = c
+                    if np.any(np.isfinite(c)):
+                        has_band[blabel][n_filled + k] = True
+                        out_mag[blabel][n_filled + k] = mag
+                        out_snr[blabel][n_filled + k] = snr
+            # CNN inference
+            with torch.no_grad():
+                xb = torch.tensor(cutouts, dtype=torch.float32, device=device)
+                p = torch.sigmoid(model(xb)).cpu().numpy()
+            # save back in original n_filled-based indexing
+            for k, (gidx, _, _) in enumerate(batch):
+                out_idx[n_filled + k] = gidx
+                out_P[n_filled + k]   = p[k]
+            n_filled += len(batch)
+        # close FITS handles
+        for blabel in list(hdus):
+            try:
+                if hdus[blabel] is not None:
+                    hdus[blabel].fileinfo()['file'].close()
+            except Exception:
+                pass
+        if (ti + 1) % 5 == 0 or ti == len(by_tile) - 1:
+            print(f"[{survey}] tile [{ti+1}/{len(by_tile)}] {tile}  "
+                  f"sources={n_filled:,}/{N_total:,}  elapsed={time.time()-t0:.1f}s",
+                  flush=True)
+    return dict(survey=survey, idxs=out_idx, P=out_P,
+                mag={b: out_mag[b] for (b, _) in band_specs},
+                snr={b: out_snr[b] for (b, _) in band_specs},
+                elapsed=time.time()-t0)
 
 
 def main():
     t_start = time.time()
-    log("=== Step 6 v01: inference ===")
-    device = best_device()
-    log(f"Device: {device}")
+    log("=== Step 6 v01 (parallel): inference ===")
 
-    # ---- load models ----
+    import torch
     log(f"Loading models from {MODELS}")
-    bundle = torch.load(MODELS, map_location=device, weights_only=False)
-    models = {}
-    for survey, in_ch in (("hst",1),("jwst",4),("vis",1),("nisp",3)):
-        if survey not in bundle["models"]:
-            log(f"  [warn] model for {survey} missing — skipping that survey")
-            continue
-        m = SmallCNN(in_ch=in_ch).to(device)
-        m.load_state_dict(bundle["models"][survey])
-        med = torch.tensor(bundle["norm_mean"][survey], device=device)
-        sig = torch.tensor(bundle["norm_std"][survey],  device=device)
-        m.set_norm(med, sig)
-        m.eval()
-        models[survey] = m
+    bundle = torch.load(MODELS, map_location="cpu", weights_only=False)
     thresholds = bundle["thresholds"]
     log(f"Thresholds: {thresholds}")
 
-    # ---- load lookup + candidates ----
     log(f"Reading lookup {LOOK}")
     lk = pq.read_table(LOOK)
     pid = np.array(lk["primary_id"].to_pylist(), dtype=object)
@@ -201,177 +260,90 @@ def main():
     N = len(pid)
     log(f"  {N:,} candidates")
 
-    # initialise per-source results
+    survey_specs = [
+        ("hst",  1, in_h, th),
+        ("jwst", 4, in_j, tj),
+        ("vis",  1, in_e, te),
+        ("nisp", 3, in_e, te),
+    ]
+
+    # Build jobs: each gets the source subset that is in-coverage for its survey.
+    jobs = []
+    for survey, in_ch, in_mask, tiles in survey_specs:
+        if survey not in bundle["models"]:
+            log(f"  [warn] model for {survey} not in bundle; skipping")
+            continue
+        idxs = np.where(in_mask)[0]
+        sources = [(int(i), float(ra[i]), float(dec[i]), str(tiles[i])) for i in idxs if tiles[i]]
+        log(f"  {survey}: {len(sources):,} sources to process")
+        jobs.append(dict(
+            survey=survey, in_ch=in_ch,
+            model_state={k: v.detach().cpu() for k, v in
+                          {**bundle["models"][survey]}.items()},
+            norm_mean=bundle["norm_mean"][survey],
+            norm_std =bundle["norm_std"][survey],
+            sources=sources,
+        ))
+
+    # Run 4 surveys in parallel.
+    log(f"\nDispatching {len(jobs)} survey workers ...")
+    t_par = time.time()
+    # Use 'spawn' for clean MPS contexts
+    try:
+        set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
+    with Pool(processes=len(jobs)) as pool:
+        results = pool.map(survey_worker, jobs)
+    log(f"\nAll survey workers done in {time.time()-t_par:.1f}s")
+    for res in results:
+        log(f"  {res['survey']} elapsed: {res['elapsed']:.1f}s")
+
+    # Stitch results into global N arrays.
     P = {s: np.full(N, np.nan, dtype=np.float32) for s in ("hst","jwst","vis","nisp")}
     MAG = {b: np.full(N, -1.0, dtype=np.float32) for b in CSV_BANDS}
-    SNR = {b: np.full(N, 0.0, dtype=np.float32) for b in CSV_BANDS}
-    HAS_BAND = {b: np.zeros(N, dtype=bool) for b in CSV_BANDS}
+    SNR = {b: np.full(N, 0.0,  dtype=np.float32) for b in CSV_BANDS}
+    for res in results:
+        s = res["survey"]
+        valid = res["idxs"] >= 0
+        P[s][res["idxs"][valid]] = res["P"][valid]
+        for b, arr in res["mag"].items():
+            MAG[b][res["idxs"][valid]] = arr[valid]
+        for b, arr in res["snr"].items():
+            SNR[b][res["idxs"][valid]] = arr[valid]
 
-    # ---- HST pass (per HST tile) ----
-    if "hst" in models:
-        hst_tiles = sorted(set(t for t in th if t and str(t) != "nan"))
-        log(f"\n--- HST inference: {len(hst_tiles)} tiles ---")
-        t0 = time.time()
-        for ti, tile in enumerate(hst_tiles):
-            idx = np.where(th == tile)[0]
-            path = f"{R.HST_DIR}/acs_I_030mas_{tile}_sci.fits"
-            sci, wcs = open_or_none(path)
-            if sci is None:
-                log(f"  HST tile {tile}: no path; {len(idx)} sources skipped")
-                continue
-            # sort by Y for sequential disk access
-            try:
-                _, ys = wcs.all_world2pix(ra[idx], dec[idx], 0)
-                order = np.argsort(ys)
-                idx = idx[order]
-            except Exception:
-                pass
-            cutouts = np.full((len(idx), 1, CUT_PIX, CUT_PIX), np.nan, dtype=np.float32)
-            for k, i in enumerate(idx):
-                c, mag, snr = cutout_and_aper(sci, wcs, ra[i], dec[i], FWHM_AS["F814W"], kind="hst")
-                cutouts[k, 0] = c
-                if np.any(np.isfinite(c)):
-                    HAS_BAND["F814W"][i] = True
-                    MAG["F814W"][i] = mag
-                    SNR["F814W"][i] = snr
-            probs = predict_batch(models["hst"], cutouts, device)
-            for k, i in enumerate(idx):
-                P["hst"][i] = probs[k]
-            if (ti + 1) % 5 == 0 or ti == len(hst_tiles) - 1:
-                log(f"  HST [{ti+1}/{len(hst_tiles)}] tile {tile} sources={len(idx)} elapsed={time.time()-t0:.1f}s")
-        log(f"HST pass done in {time.time()-t0:.1f}s")
-
-    # ---- JWST pass (per JWST tile) ----
-    if "jwst" in models:
-        jwst_tiles = sorted(set(t for t in tj if t and str(t) != "nan"))
-        log(f"\n--- JWST inference: {len(jwst_tiles)} tiles ---")
-        t0 = time.time()
-        for ti, tile in enumerate(jwst_tiles):
-            idx = np.where(tj == tile)[0]
-            # open all 4 NIRCam bands for this tile (single source loop)
-            hdus = {}; wcss = {}
-            for blabel, R_band in JWST_BANDS:
-                path = R.resolve_jwst_path(tile, R_band.lower())
-                sci, wcs = open_or_none(path)
-                hdus[blabel] = sci; wcss[blabel] = wcs
-            ref_wcs = next((w for w in wcss.values() if w is not None), None)
-            if ref_wcs is None:
-                log(f"  JWST tile {tile}: no paths; {len(idx)} sources skipped")
-                continue
-            try:
-                _, ys = ref_wcs.all_world2pix(ra[idx], dec[idx], 0)
-                order = np.argsort(ys)
-                idx = idx[order]
-            except Exception:
-                pass
-            cutouts = np.full((len(idx), 4, CUT_PIX, CUT_PIX), np.nan, dtype=np.float32)
-            for k, i in enumerate(idx):
-                for ci, (blabel, _) in enumerate(JWST_BANDS):
-                    if hdus[blabel] is None: continue
-                    c, mag, snr = cutout_and_aper(hdus[blabel], wcss[blabel], ra[i], dec[i],
-                                                  FWHM_AS[blabel], kind="jwst")
-                    cutouts[k, ci] = c
-                    if np.any(np.isfinite(c)):
-                        HAS_BAND[blabel][i] = True
-                        MAG[blabel][i] = mag
-                        SNR[blabel][i] = snr
-            probs = predict_batch(models["jwst"], cutouts, device)
-            for k, i in enumerate(idx):
-                P["jwst"][i] = probs[k]
-            if (ti + 1) % 2 == 0 or ti == len(jwst_tiles) - 1:
-                log(f"  JWST [{ti+1}/{len(jwst_tiles)}] tile {tile} sources={len(idx)} elapsed={time.time()-t0:.1f}s")
-        log(f"JWST pass done in {time.time()-t0:.1f}s")
-
-    # ---- Euclid pass per tile (VIS + NISP YJH share the tile id) ----
-    eu_tiles = sorted(set(t for t in te if t and str(t) != "nan"))
-    log(f"\n--- Euclid inference: {len(eu_tiles)} tiles ---")
-    t0 = time.time()
-    for ti, tile in enumerate(eu_tiles):
-        idx = np.where(te == tile)[0]
-        # open VIS + 3 NISP
-        hdus = {}; wcss = {}
-        for blabel, R_band in VIS_BANDS + NISP_BANDS:
-            path = R.resolve_euclid_path(tile, R_band)
-            sci, wcs = open_or_none(path)
-            hdus[blabel] = sci; wcss[blabel] = wcs
-        ref_wcs = next((w for w in wcss.values() if w is not None), None)
-        if ref_wcs is None:
-            log(f"  Euclid tile {tile}: no paths; {len(idx)} sources skipped")
-            continue
-        try:
-            _, ys = ref_wcs.all_world2pix(ra[idx], dec[idx], 0)
-            order = np.argsort(ys)
-            idx = idx[order]
-        except Exception:
-            pass
-        # VIS cutouts (1 channel)
-        if "vis" in models:
-            cuts_vis = np.full((len(idx), 1, CUT_PIX, CUT_PIX), np.nan, dtype=np.float32)
-            for k, i in enumerate(idx):
-                if hdus["VIS"] is None: continue
-                c, mag, snr = cutout_and_aper(hdus["VIS"], wcss["VIS"], ra[i], dec[i],
-                                              FWHM_AS["VIS"], kind="euclid")
-                cuts_vis[k, 0] = c
-                if np.any(np.isfinite(c)):
-                    HAS_BAND["VIS"][i] = True
-                    MAG["VIS"][i] = mag
-                    SNR["VIS"][i] = snr
-            probs = predict_batch(models["vis"], cuts_vis, device)
-            for k, i in enumerate(idx):
-                P["vis"][i] = probs[k]
-        # NISP cutouts (3 channels)
-        if "nisp" in models:
-            cuts_nisp = np.full((len(idx), 3, CUT_PIX, CUT_PIX), np.nan, dtype=np.float32)
-            for k, i in enumerate(idx):
-                for ci, (blabel, _) in enumerate(NISP_BANDS):
-                    if hdus[blabel] is None: continue
-                    c, mag, snr = cutout_and_aper(hdus[blabel], wcss[blabel], ra[i], dec[i],
-                                                  FWHM_AS[blabel], kind="euclid")
-                    cuts_nisp[k, ci] = c
-                    if np.any(np.isfinite(c)):
-                        HAS_BAND[blabel][i] = True
-                        MAG[blabel][i] = mag
-                        SNR[blabel][i] = snr
-            probs = predict_batch(models["nisp"], cuts_nisp, device)
-            for k, i in enumerate(idx):
-                P["nisp"][i] = probs[k]
-        if (ti + 1) % 5 == 0 or ti == len(eu_tiles) - 1:
-            log(f"  Euclid [{ti+1}/{len(eu_tiles)}] tile {tile} sources={len(idx)} elapsed={time.time()-t0:.1f}s")
-    log(f"Euclid pass done in {time.time()-t0:.1f}s")
-
-    # ---- combine: 1-of-4 detection rule ----
-    thr_hst = thresholds.get("hst", 0.5)
+    # 1-of-4 detection rule
+    thr_hst = thresholds.get("hst",  0.5)
     thr_jwst = thresholds.get("jwst", 0.5)
-    thr_vis = thresholds.get("vis", 0.5)
+    thr_vis = thresholds.get("vis",  0.5)
     thr_nisp = thresholds.get("nisp", 0.5)
     det_hst  = np.where(np.isfinite(P["hst"]),  P["hst"]  >= thr_hst,  False)
     det_jwst = np.where(np.isfinite(P["jwst"]), P["jwst"] >= thr_jwst, False)
     det_vis  = np.where(np.isfinite(P["vis"]),  P["vis"]  >= thr_vis,  False)
     det_nisp = np.where(np.isfinite(P["nisp"]), P["nisp"] >= thr_nisp, False)
-    n_det = (det_hst.astype(int) + det_jwst.astype(int) + det_vis.astype(int) + det_nisp.astype(int))
+    n_det = det_hst.astype(int) + det_jwst.astype(int) + det_vis.astype(int) + det_nisp.astype(int)
     is_sn = (n_det == 1)
     log(f"\n=== detection summary ===")
     log(f"  HST detected:        {int(det_hst.sum()):>10,}")
     log(f"  JWST detected:       {int(det_jwst.sum()):>10,}")
-    log(f"  Euclid-VIS detected: {int(det_vis.sum()):>10,}")
-    log(f"  Euclid-NISP det:     {int(det_nisp.sum()):>10,}")
+    log(f"  VIS detected:        {int(det_vis.sum()):>10,}")
+    log(f"  NISP detected:       {int(det_nisp.sum()):>10,}")
     log(f"  SN candidates (1-of-4): {int(is_sn.sum()):>10,}")
 
-    # composite confidence: (detected-survey P) * (1 - max of other 3 surveys' P)
+    # composite confidence
     P_arr = np.stack([np.nan_to_num(P[s], nan=0.0) for s in ("hst","jwst","vis","nisp")], axis=1)
     det_arr = np.stack([det_hst,det_jwst,det_vis,det_nisp], axis=1)
     det_survey_p = np.where(det_arr, P_arr, 0.0).max(axis=1)
     nondet_max_p = np.where(~det_arr, P_arr, 0.0).max(axis=1)
     comp_conf = det_survey_p * (1.0 - nondet_max_p)
 
-    # which survey detected? (only meaningful for is_sn=True)
     survey_names = np.array(["HST","JWST","EUCLID-VIS","EUCLID-NISP"])
     which = np.full(N, "", dtype=object)
     for k, name in enumerate(survey_names):
         col = det_arr[:, k] & is_sn
         which[col] = name
 
-    # ---- write full scored parquet (all sources) ----
+    # Write parquet (all sources)
     log(f"\nWriting all-scored parquet → {OUT_PARQ}")
     out_table = pa.table({
         "primary_id": pid.tolist(),
@@ -391,24 +363,21 @@ def main():
     })
     pq.write_table(out_table, OUT_PARQ, compression="zstd")
 
-    # ---- write CSV in v32 schema (SN candidates only) ----
+    # CSV in v32 schema
     log(f"Writing CSV → {OUT_CSV}")
     sn_idx = np.where(is_sn)[0]
-    # sort by composite confidence desc
     sn_idx = sn_idx[np.argsort(-comp_conf[sn_idx])]
-    # best band: among bands with snr>3 in the detected survey, highest snr_aper
-    band_to_survey = {"F814W":"HST", "F115W":"JWST","F150W":"JWST","F277W":"JWST","F444W":"JWST",
+    band_to_survey = {"F814W":"HST","F115W":"JWST","F150W":"JWST","F277W":"JWST","F444W":"JWST",
                       "VIS":"EUCLID-VIS","Y":"EUCLID-NISP","J":"EUCLID-NISP","H":"EUCLID-NISP"}
     rows = []
     for cand_no, i in enumerate(sn_idx, start=1):
         det_name = which[i]
-        # candidate bands for "best band"
         bands_for_det = [b for b, s in band_to_survey.items() if s == det_name]
         best_band = ""; best_snr = 0.0
         for b in bands_for_det:
-            s = SNR[b][i]
+            s = float(SNR[b][i])
             if np.isfinite(s) and s > best_snr:
-                best_snr = float(s); best_band = b
+                best_snr = s; best_band = b
         r = {
             "id": f"cand_{cand_no:05d}",
             "primary_id": str(pid[i]),
@@ -452,7 +421,7 @@ def main():
     else:
         log("No SN candidates found.")
 
-    # ---- minimal v01 webpage ----
+    # webpage
     HTML_DIR.mkdir(parents=True, exist_ok=True)
     log(f"Writing webpage → {HTML_DIR}/index.html")
     page = ["<!doctype html><html><head><title>SN search v01</title>",
@@ -460,20 +429,20 @@ def main():
             ".wrap{max-width:1300px;margin:0 auto;padding:20px}",
             "table{border-collapse:collapse;font-family:monospace;font-size:12px}",
             "th,td{border:1px solid #ccc;padding:3px 6px;text-align:right}",
-            "th{background:#eee}",
-            "td.lab{text-align:left;font-weight:bold}",
-            "h1{color:#333}",
-            ".det{background:#e0f5e0}",
+            "th{background:#eee} td.lab{text-align:left;font-weight:bold}",
+            "h1{color:#333} .det{background:#e0f5e0}",
             "</style></head><body><div class='wrap'>",
             "<h1>SN search v01 — 1-of-4 detection across HST / JWST / Euclid-VIS / Euclid-NISP</h1>",
             f"<p>Built: {time.strftime('%Y-%m-%d %H:%M:%S')}</p>",
             f"<p>Total candidates evaluated: {N:,}<br>",
             f"Detected in exactly one survey (= SN candidate): <b>{int(is_sn.sum()):,}</b><br>",
-            f"Top {min(TOP_N_WEB, len(rows))} shown below (sorted by composite confidence).</p>",
-            f"<p>Per-survey detection counts (overall): HST={int(det_hst.sum()):,}, "
-            f"JWST={int(det_jwst.sum()):,}, VIS={int(det_vis.sum()):,}, NISP={int(det_nisp.sum()):,}.</p>",
-            f"<p>Thresholds used: HST P&ge;{thr_hst:.4f}, JWST P&ge;{thr_jwst:.4f}, "
-            f"VIS P&ge;{thr_vis:.4f}, NISP P&ge;{thr_nisp:.4f} (LOO-tuned at FPR=10<sup>&minus;3</sup>).</p>",
+            f"Top {min(TOP_N_WEB, len(rows))} shown below (by composite confidence).</p>",
+            f"<p>Per-survey detection counts: HST={int(det_hst.sum()):,}, "
+            f"JWST={int(det_jwst.sum()):,}, VIS={int(det_vis.sum()):,}, "
+            f"NISP={int(det_nisp.sum()):,}.</p>",
+            f"<p>Thresholds (LOO @ FPR=10<sup>&minus;3</sup>): "
+            f"HST&ge;{thr_hst:.4f}, JWST&ge;{thr_jwst:.4f}, "
+            f"VIS&ge;{thr_vis:.4f}, NISP&ge;{thr_nisp:.4f}.</p>",
             "<table><thead><tr><th>rank</th><th>id</th><th>tel</th><th>ra</th><th>dec</th>"
             "<th>comp_conf</th><th>best band</th><th>best snr</th>"
             "<th>P_hst</th><th>P_jwst</th><th>P_vis</th><th>P_nisp</th></tr></thead><tbody>"]
@@ -483,16 +452,11 @@ def main():
                     f"<td>{comp_conf[i]:.3f}</td>"
                     f"<td>{rows[rank-1]['best_band']}</td>"
                     f"<td>{rows[rank-1]['best_snr']}</td>"
-                    f"<td class='{'det' if det_hst[i] else ''}'>"
-                    f"{P['hst'][i]:.3f}</td>"
-                    f"<td class='{'det' if det_jwst[i] else ''}'>"
-                    f"{P['jwst'][i]:.3f}</td>"
-                    f"<td class='{'det' if det_vis[i] else ''}'>"
-                    f"{P['vis'][i]:.3f}</td>"
-                    f"<td class='{'det' if det_nisp[i] else ''}'>"
-                    f"{P['nisp'][i]:.3f}</td></tr>")
-    page.append("</tbody></table>")
-    page.append("</div></body></html>")
+                    f"<td class='{'det' if det_hst[i] else ''}'>{P['hst'][i]:.3f}</td>"
+                    f"<td class='{'det' if det_jwst[i] else ''}'>{P['jwst'][i]:.3f}</td>"
+                    f"<td class='{'det' if det_vis[i] else ''}'>{P['vis'][i]:.3f}</td>"
+                    f"<td class='{'det' if det_nisp[i] else ''}'>{P['nisp'][i]:.3f}</td></tr>")
+    page.append("</tbody></table></div></body></html>")
     (HTML_DIR / "index.html").write_text("\n".join(page))
     log(f"=== Step 6 done in {time.time()-t_start:.1f}s ===")
 
