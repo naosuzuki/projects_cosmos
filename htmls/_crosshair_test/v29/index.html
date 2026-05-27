@@ -1,0 +1,81 @@
+<!doctype html><html><head><title>v29 — multi-band DAO (bug-fixed picker)</title>
+<style>body{font-family:serif;background:#fafafa}
+.wrap{max-width:1500px;margin:0 auto;padding:20px}
+.back{font-size:13px;color:#666}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.cell img{width:100%;display:block;border:1px solid #ddd}
+.cell .fn{font-family:monospace;font-size:10px;color:#999;text-align:center;margin-top:3px}
+table{border-collapse:collapse;font-family:monospace;font-size:11px;margin-top:18px}
+th,td{border:1px solid #ccc;padding:3px 6px;text-align:right}
+th{background:#eee} td.best{background:#fff5b0}
+td.bad{background:#fdd}
+</style></head><body><div class='wrap'>
+<p class='back'><a href='../index.html'>&larr; _crosshair_test</a> | <a href='../../index.html'>all decks</a></p>
+<h1>v29 &mdash; multi-band DAO (best-band picker bug-fixed)</h1>
+<p>Picker = highest <b>snr_aper</b> at the catalog SN position among bands where DAO has a candidate within <b>sep_sn &le; max(0.10&Prime;, 1.5&times;FWHM)</b>.  snr_aper is measured AT the catalog SN coordinate using a PSF-matched aperture (<i>r</i>=1&times;FWHM, ring 2&ndash;3.5&times;FWHM), so a host detected in a redder band cannot hijack the choice.</p>
+<p><b style='color:red'>host=red</b>, <b style='color:#0cc'>SN=cyan</b>, <b style='color:#cc0'>yellow=DAO 3&sigma; candidates</b>.</p>
+<div class='grid'>
+<div class='cell'><img src='sn_63924_DAO_check.png'><div class='fn'>63924 &middot; best=NIR-Y &middot; snr_aper=7.6</div></div>
+<div class='cell'><img src='sn_130972_DAO_check.png'><div class='fn'>130972 &middot; best=F814W &middot; snr_aper=47.8</div></div>
+<div class='cell'><img src='sn_246188_DAO_check.png'><div class='fn'>246188 &middot; best=F115W &middot; snr_aper=14.7</div></div>
+<div class='cell'><img src='sn_296673_DAO_check.png'><div class='fn'>296673 &middot; best=F150W &middot; snr_aper=20.0</div></div>
+<div class='cell'><img src='sn_318858_DAO_check.png'><div class='fn'>318858 &middot; best=F115W &middot; snr_aper=201.0</div></div>
+<div class='cell'><img src='sn_320233_DAO_check.png'><div class='fn'>320233 &middot; best=F150W &middot; snr_aper=173.2</div></div>
+<div class='cell'><img src='sn_371996_DAO_check.png'><div class='fn'>371996 &middot; best=F814W &middot; snr_aper=76.1</div></div>
+<div class='cell'><img src='sn_435613_DAO_check.png'><div class='fn'>435613 &middot; best=F444W &middot; snr_aper=33.2</div></div>
+<div class='cell'><img src='sn_435769_DAO_check.png'><div class='fn'>435769 &middot; best=F115W &middot; snr_aper=35.0</div></div>
+<div class='cell'><img src='sn_468896_DAO_check.png'><div class='fn'>468896 &middot; best=F444W &middot; snr_aper=10.7</div></div>
+<div class='cell'><img src='sn_471959_DAO_check.png'><div class='fn'>471959 &middot; best=F814W &middot; snr_aper=33.1</div></div>
+</div>
+<h2>Best-S/N band per source</h2>
+<table><thead><tr><th>ID</th><th>tel</th><th>band</th><th>sep_sn</th><th>pix_snr</th><th>snr_aper</th><th>mag_aper</th><th>peak/bg_std</th><th>sharp</th><th>rnd1</th><th>rnd2</th></tr></thead><tbody>
+<tr><td>63924</td><td>EUCLID</td><td>NIR-Y</td><td>0.00&Prime;</td><td>+25.3&sigma;</td><td>+7.59&sigma;</td><td>+18.11</td><td>25.27</td><td>+0.45</td><td>+0.12</td><td>-0.19</td></tr>
+<tr><td>130972</td><td>HST</td><td>F814W</td><td>0.01&Prime;</td><td>+49.4&sigma;</td><td>+47.75&sigma;</td><td>+25.53</td><td>49.45</td><td>+0.56</td><td>+0.03</td><td>-0.17</td></tr>
+<tr><td>246188</td><td>JWST</td><td>F115W</td><td>0.00&Prime;</td><td>+108.7&sigma;</td><td>+14.74&sigma;</td><td>+25.48</td><td>108.70</td><td>+0.77</td><td>+0.09</td><td>-0.09</td></tr>
+<tr><td>296673</td><td>JWST</td><td>F150W</td><td>0.01&Prime;</td><td>+9.7&sigma;</td><td>+20.03&sigma;</td><td>+27.49</td><td>10.15</td><td>+0.62</td><td>+0.44</td><td>+0.03</td></tr>
+<tr><td>318858</td><td>JWST</td><td>F115W</td><td>0.00&Prime;</td><td>+194.6&sigma;</td><td>+201.00&sigma;</td><td>+24.55</td><td>194.55</td><td>+0.72</td><td>+0.21</td><td>-0.10</td></tr>
+<tr><td>320233</td><td>JWST</td><td>F150W</td><td>0.01&Prime;</td><td>+115.2&sigma;</td><td>+173.22&sigma;</td><td>+25.37</td><td>115.20</td><td>+0.69</td><td>+0.19</td><td>-0.13</td></tr>
+<tr><td>371996</td><td>HST</td><td>F814W</td><td>0.00&Prime;</td><td>+91.8&sigma;</td><td>+76.12&sigma;</td><td>+24.81</td><td>91.81</td><td>+0.57</td><td>-0.09</td><td>-0.09</td></tr>
+<tr><td>435613</td><td>JWST</td><td>F444W</td><td>0.16&Prime;</td><td>+19.7&sigma;</td><td>+33.19&sigma;</td><td>+25.13</td><td>38.18</td><td>+0.31</td><td>+0.92</td><td>+0.12</td></tr>
+<tr><td>435769</td><td>JWST</td><td>F115W</td><td>0.00&Prime;</td><td>+57.6&sigma;</td><td>+35.04&sigma;</td><td>+26.14</td><td>57.60</td><td>+0.84</td><td>+0.32</td><td>+0.02</td></tr>
+<tr><td>468896</td><td>JWST</td><td>F444W</td><td>0.10&Prime;</td><td>+13.4&sigma;</td><td>+10.67&sigma;</td><td>+25.68</td><td>15.11</td><td>+0.50</td><td>-0.19</td><td>-0.90</td></tr>
+<tr><td>471959</td><td>HST</td><td>F814W</td><td>0.01&Prime;</td><td>+113.7&sigma;</td><td>+33.09&sigma;</td><td>+24.35</td><td>113.71</td><td>+0.49</td><td>+0.00</td><td>-0.05</td></tr>
+</tbody></table>
+<h2>Full multi-band breakdown (one row per (SN, band))</h2>
+<table><thead><tr><th>ID</th><th>band</th><th>sep_sn</th><th>tol</th><th>pix_snr</th><th>snr_aper</th><th>mag_aper</th><th>peak/bg_std</th><th>sharp</th><th>rnd1</th><th>rnd2</th><th>eligible?</th></tr></thead><tbody>
+<tr><td class='best'>130972</td><td class='best'>F814W</td><td class='best'>0.01&Prime;</td><td class='best'>0.20&Prime;</td><td class='best'>+49.4&sigma;</td><td class='best'>+47.75&sigma;</td><td class='best'>+25.53</td><td class='best'>49.45</td><td class='best'>+0.56</td><td class='best'>+0.03</td><td class='best'>-0.17</td><td class='best'>yes</td></tr>
+<tr><td class='best'>371996</td><td class='best'>F814W</td><td class='best'>0.00&Prime;</td><td class='best'>0.20&Prime;</td><td class='best'>+91.8&sigma;</td><td class='best'>+76.12&sigma;</td><td class='best'>+24.81</td><td class='best'>91.81</td><td class='best'>+0.57</td><td class='best'>-0.09</td><td class='best'>-0.09</td><td class='best'>yes</td></tr>
+<tr><td class='best'>471959</td><td class='best'>F814W</td><td class='best'>0.01&Prime;</td><td class='best'>0.20&Prime;</td><td class='best'>+113.7&sigma;</td><td class='best'>+33.09&sigma;</td><td class='best'>+24.35</td><td class='best'>113.71</td><td class='best'>+0.49</td><td class='best'>+0.00</td><td class='best'>-0.05</td><td class='best'>yes</td></tr>
+<tr><td class='best'>63924</td><td class='best'>NIR-Y</td><td class='best'>0.00&Prime;</td><td class='best'>0.79&Prime;</td><td class='best'>+25.3&sigma;</td><td class='best'>+7.59&sigma;</td><td class='best'>+18.11</td><td class='best'>25.27</td><td class='best'>+0.45</td><td class='best'>+0.12</td><td class='best'>-0.19</td><td class='best'>yes</td></tr>
+<tr><td>63924</td><td>NIR-J</td><td>0.05&Prime;</td><td>0.81&Prime;</td><td>+13.6&sigma;</td><td>+3.62&sigma;</td><td>+18.23</td><td>13.58</td><td>+0.45</td><td>-0.10</td><td>-0.30</td><td>yes</td></tr>
+<tr><td>63924</td><td>NIR-H</td><td>0.27&Prime;</td><td>0.85&Prime;</td><td>+7.5&sigma;</td><td>+2.04&sigma;</td><td>+18.44</td><td>7.49</td><td>+0.45</td><td>+0.06</td><td>-0.83</td><td>yes</td></tr>
+<tr><td class='best'>318858</td><td class='best'>F115W</td><td class='best'>0.00&Prime;</td><td class='best'>0.10&Prime;</td><td class='best'>+194.6&sigma;</td><td class='best'>+201.00&sigma;</td><td class='best'>+24.55</td><td class='best'>194.55</td><td class='best'>+0.72</td><td class='best'>+0.21</td><td class='best'>-0.10</td><td class='best'>yes</td></tr>
+<tr><td>318858</td><td>F150W</td><td>0.01&Prime;</td><td>0.10&Prime;</td><td>+151.7&sigma;</td><td>+147.66&sigma;</td><td>+24.90</td><td>150.77</td><td>+0.64</td><td>-0.37</td><td>-0.11</td><td>yes</td></tr>
+<tr><td>318858</td><td>F277W</td><td>0.00&Prime;</td><td>0.20&Prime;</td><td>+84.9&sigma;</td><td>+12.53&sigma;</td><td>+25.68</td><td>87.41</td><td>+0.47</td><td>-0.33</td><td>-0.28</td><td>yes</td></tr>
+<tr><td>318858</td><td>F444W</td><td>0.01&Prime;</td><td>0.24&Prime;</td><td>+15.6&sigma;</td><td>+4.86&sigma;</td><td>+26.79</td><td>16.16</td><td>+0.48</td><td>-0.19</td><td>+0.08</td><td>yes</td></tr>
+<tr><td>320233</td><td>F115W</td><td>0.01&Prime;</td><td>0.10&Prime;</td><td>+92.7&sigma;</td><td>+145.40&sigma;</td><td>+25.38</td><td>92.74</td><td>+0.69</td><td>+0.25</td><td>-0.12</td><td>yes</td></tr>
+<tr><td class='best'>320233</td><td class='best'>F150W</td><td class='best'>0.01&Prime;</td><td class='best'>0.10&Prime;</td><td class='best'>+115.2&sigma;</td><td class='best'>+173.22&sigma;</td><td class='best'>+25.37</td><td class='best'>115.20</td><td class='best'>+0.69</td><td class='best'>+0.19</td><td class='best'>-0.13</td><td class='best'>yes</td></tr>
+<tr><td>320233</td><td>F277W</td><td>0.01&Prime;</td><td>0.20&Prime;</td><td>+81.7&sigma;</td><td>+81.78&sigma;</td><td>+25.61</td><td>84.16</td><td>+0.41</td><td>-0.08</td><td>+0.17</td><td>yes</td></tr>
+<tr><td>320233</td><td>F444W</td><td>0.01&Prime;</td><td>0.24&Prime;</td><td>+23.5&sigma;</td><td>+45.96&sigma;</td><td>+26.26</td><td>23.46</td><td>+0.40</td><td>+0.04</td><td>-0.01</td><td>yes</td></tr>
+<tr><td class='best'>246188</td><td class='best'>F115W</td><td class='best'>0.00&Prime;</td><td class='best'>0.10&Prime;</td><td class='best'>+108.7&sigma;</td><td class='best'>+14.74&sigma;</td><td class='best'>+25.48</td><td class='best'>108.70</td><td class='best'>+0.77</td><td class='best'>+0.09</td><td class='best'>-0.09</td><td class='best'>yes</td></tr>
+<tr><td>246188</td><td>F150W</td><td>0.00&Prime;</td><td>0.10&Prime;</td><td>+106.7&sigma;</td><td>+8.16&sigma;</td><td>+25.78</td><td>106.73</td><td>+0.75</td><td>+0.10</td><td>-0.03</td><td>yes</td></tr>
+<tr><td class='bad'>246188</td><td class='bad'>F277W</td><td class='bad'>0.33&Prime;</td><td class='bad'>0.20&Prime;</td><td class='bad'>+81.5&sigma;</td><td class='bad'>+1.71&sigma;</td><td class='bad'>+24.70</td><td class='bad'>1156.89</td><td class='bad'>+0.36</td><td class='bad'>+0.08</td><td class='bad'>-0.11</td><td class='bad'>no</td></tr>
+<tr><td>246188</td><td>F444W</td><td>0.17&Prime;</td><td>0.24&Prime;</td><td>+40.6&sigma;</td><td>+3.54&sigma;</td><td>+24.51</td><td>98.12</td><td>+0.48</td><td>-0.79</td><td>+0.32</td><td>yes</td></tr>
+<tr><td class='bad'>296673</td><td class='bad'>F115W</td><td class='bad'>0.65&Prime;</td><td class='bad'>0.10&Prime;</td><td class='bad'>+3.0&sigma;</td><td class='bad'>+4.94&sigma;</td><td class='bad'>+28.60</td><td class='bad'>3.61</td><td class='bad'>+0.49</td><td class='bad'>+0.47</td><td class='bad'>+0.99</td><td class='bad'>no</td></tr>
+<tr><td class='best'>296673</td><td class='best'>F150W</td><td class='best'>0.01&Prime;</td><td class='best'>0.10&Prime;</td><td class='best'>+9.7&sigma;</td><td class='best'>+20.03&sigma;</td><td class='best'>+27.49</td><td class='best'>10.15</td><td class='best'>+0.62</td><td class='best'>+0.44</td><td class='best'>+0.03</td><td class='best'>yes</td></tr>
+<tr><td>296673</td><td>F277W</td><td>0.00&Prime;</td><td>0.20&Prime;</td><td>+11.3&sigma;</td><td>+11.64&sigma;</td><td>+27.29</td><td>11.31</td><td>+0.46</td><td>+0.08</td><td>+0.50</td><td>yes</td></tr>
+<tr><td>296673</td><td>F444W</td><td>0.09&Prime;</td><td>0.24&Prime;</td><td>+3.6&sigma;</td><td>+8.62&sigma;</td><td>+27.47</td><td>3.65</td><td>+0.43</td><td>+0.93</td><td>+0.80</td><td>yes</td></tr>
+<tr><td>435613</td><td>F115W</td><td>0.00&Prime;</td><td>0.10&Prime;</td><td>+61.5&sigma;</td><td>+15.39&sigma;</td><td>+25.76</td><td>61.50</td><td>+0.72</td><td>+0.01</td><td>-0.09</td><td>yes</td></tr>
+<tr><td>435613</td><td>F150W</td><td>0.00&Prime;</td><td>0.10&Prime;</td><td>+61.2&sigma;</td><td>+12.07&sigma;</td><td>+25.88</td><td>61.23</td><td>+0.68</td><td>+0.02</td><td>-0.11</td><td>yes</td></tr>
+<tr><td>435613</td><td>F277W</td><td>0.15&Prime;</td><td>0.20&Prime;</td><td>+31.7&sigma;</td><td>+18.60&sigma;</td><td>+25.30</td><td>59.05</td><td>+0.34</td><td>+0.69</td><td>-0.31</td><td>yes</td></tr>
+<tr><td class='best'>435613</td><td class='best'>F444W</td><td class='best'>0.16&Prime;</td><td class='best'>0.24&Prime;</td><td class='best'>+19.7&sigma;</td><td class='best'>+33.19&sigma;</td><td class='best'>+25.13</td><td class='best'>38.18</td><td class='best'>+0.31</td><td class='best'>+0.92</td><td class='best'>+0.12</td><td class='best'>yes</td></tr>
+<tr><td class='best'>435769</td><td class='best'>F115W</td><td class='best'>0.00&Prime;</td><td class='best'>0.10&Prime;</td><td class='best'>+57.6&sigma;</td><td class='best'>+35.04&sigma;</td><td class='best'>+26.14</td><td class='best'>57.60</td><td class='best'>+0.84</td><td class='best'>+0.32</td><td class='best'>+0.02</td><td class='best'>yes</td></tr>
+<tr><td>435769</td><td>F150W</td><td>0.01&Prime;</td><td>0.10&Prime;</td><td>+44.6&sigma;</td><td>+33.10&sigma;</td><td>+26.28</td><td>44.56</td><td>+0.71</td><td>+0.41</td><td>+0.11</td><td>yes</td></tr>
+<tr><td>435769</td><td>F277W</td><td>0.03&Prime;</td><td>0.20&Prime;</td><td>+20.8&sigma;</td><td>+13.05&sigma;</td><td>+26.40</td><td>28.22</td><td>+0.47</td><td>-0.25</td><td>-0.31</td><td>yes</td></tr>
+<tr><td>435769</td><td>F444W</td><td>0.07&Prime;</td><td>0.24&Prime;</td><td>+9.7&sigma;</td><td>+10.90&sigma;</td><td>+26.40</td><td>11.36</td><td>+0.35</td><td>-0.39</td><td>-0.18</td><td>yes</td></tr>
+<tr><td>468896</td><td>F115W</td><td>0.00&Prime;</td><td>0.10&Prime;</td><td>+27.7&sigma;</td><td>+7.01&sigma;</td><td>+26.68</td><td>27.67</td><td>+0.68</td><td>-0.04</td><td>+0.09</td><td>yes</td></tr>
+<tr><td>468896</td><td>F150W</td><td>0.00&Prime;</td><td>0.10&Prime;</td><td>+37.3&sigma;</td><td>+9.44&sigma;</td><td>+26.53</td><td>37.30</td><td>+0.66</td><td>-0.23</td><td>+0.02</td><td>yes</td></tr>
+<tr><td>468896</td><td>F277W</td><td>0.01&Prime;</td><td>0.20&Prime;</td><td>+26.0&sigma;</td><td>+5.53&sigma;</td><td>+25.70</td><td>25.01</td><td>+0.35</td><td>-0.04</td><td>+0.03</td><td>yes</td></tr>
+<tr><td class='best'>468896</td><td class='best'>F444W</td><td class='best'>0.10&Prime;</td><td class='best'>0.24&Prime;</td><td class='best'>+13.4&sigma;</td><td class='best'>+10.67&sigma;</td><td class='best'>+25.68</td><td class='best'>15.11</td><td class='best'>+0.50</td><td class='best'>-0.19</td><td class='best'>-0.90</td><td class='best'>yes</td></tr>
+</tbody></table>
+</div></body></html>

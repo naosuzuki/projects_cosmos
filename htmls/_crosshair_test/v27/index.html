@@ -1,0 +1,80 @@
+<!doctype html><html><head><title>v27 — multi-band DAO, best-S/N band per source</title>
+<style>body{font-family:serif;background:#fafafa}
+.wrap{max-width:1500px;margin:0 auto;padding:20px}
+.back{font-size:13px;color:#666}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.cell img{width:100%;display:block;border:1px solid #ddd}
+.cell .fn{font-family:monospace;font-size:10px;color:#999;text-align:center;margin-top:3px}
+table{border-collapse:collapse;font-family:monospace;font-size:11px;margin-top:18px}
+th,td{border:1px solid #ccc;padding:3px 6px;text-align:right}
+th{background:#eee} td.best{background:#fff5b0}
+</style></head><body><div class='wrap'>
+<p class='back'><a href='../index.html'>&larr; _crosshair_test</a> | <a href='../../index.html'>all decks</a></p>
+<h1>v27 &mdash; multi-band DAO (best-S/N band per source)</h1>
+<p><b>aper_r</b>=1&times;FWHM (SNR-optimal); ring 2&ndash;3.5&times;FWHM; <b>snr_aper</b>=flux/(&sigma;_ring&radic;n).</p><p>DAO scan in every band of each source's own telescope; cyan circle and panel are drawn in the band with the highest <b>peak/bg_std</b>.</p>
+<p><b style='color:red'>host=red</b>, <b style='color:#0cc'>SN=cyan</b>, <b style='color:#cc0'>yellow=DAO 3&sigma; candidates</b>.</p>
+<div class='grid'>
+<div class='cell'><img src='sn_63924_DAO_check.png'><div class='fn'>63924 &middot; best=NIR-Y &middot; SNR=25.3</div></div>
+<div class='cell'><img src='sn_130972_DAO_check.png'><div class='fn'>130972 &middot; best=F814W &middot; SNR=49.4</div></div>
+<div class='cell'><img src='sn_246188_DAO_check.png'><div class='fn'>246188 &middot; best=F277W &middot; SNR=1156.9</div></div>
+<div class='cell'><img src='sn_296673_DAO_check.png'><div class='fn'>296673 &middot; best=F277W &middot; SNR=11.3</div></div>
+<div class='cell'><img src='sn_318858_DAO_check.png'><div class='fn'>318858 &middot; best=F115W &middot; SNR=194.6</div></div>
+<div class='cell'><img src='sn_320233_DAO_check.png'><div class='fn'>320233 &middot; best=F150W &middot; SNR=115.2</div></div>
+<div class='cell'><img src='sn_371996_DAO_check.png'><div class='fn'>371996 &middot; best=F814W &middot; SNR=91.8</div></div>
+<div class='cell'><img src='sn_435613_DAO_check.png'><div class='fn'>435613 &middot; best=F115W &middot; SNR=61.5</div></div>
+<div class='cell'><img src='sn_435769_DAO_check.png'><div class='fn'>435769 &middot; best=F115W &middot; SNR=57.6</div></div>
+<div class='cell'><img src='sn_468896_DAO_check.png'><div class='fn'>468896 &middot; best=F150W &middot; SNR=37.3</div></div>
+<div class='cell'><img src='sn_471959_DAO_check.png'><div class='fn'>471959 &middot; best=F814W &middot; SNR=113.7</div></div>
+</div>
+<h2>Best-S/N band per source</h2>
+<table><thead><tr><th>ID</th><th>tel</th><th>band</th><th>sep_host</th><th>sep_sn</th><th>peak</th><th>bg_std</th><th>peak/bg_std</th><th>snr_aper</th><th>mag_aper</th><th>sharp</th><th>rnd1</th><th>rnd2</th><th>flux</th><th>mag</th></tr></thead><tbody>
+<tr><td>63924</td><td>EUCLID</td><td>NIR-Y</td><td>1.87&Prime;</td><td>0.00&Prime;</td><td>7.080</td><td>0.2801</td><td>25.27</td><td>7.59</td><td>18.11</td><td>+0.45</td><td>+0.12</td><td>-0.19</td><td>180.39</td><td>-5.64</td></tr>
+<tr><td>130972</td><td>HST</td><td>F814W</td><td>1.04&Prime;</td><td>0.01&Prime;</td><td>0.095</td><td>0.0019</td><td>49.45</td><td>47.75</td><td>25.53</td><td>+0.56</td><td>+0.03</td><td>-0.17</td><td>1.15</td><td>-0.15</td></tr>
+<tr><td>246188</td><td>JWST</td><td>F277W</td><td>0.34&Prime;</td><td>0.33&Prime;</td><td>9.863</td><td>0.0085</td><td>1156.89</td><td>1.71</td><td>24.70</td><td>+0.36</td><td>+0.08</td><td>-0.11</td><td>171.92</td><td>-5.59</td></tr>
+<tr><td>296673</td><td>JWST</td><td>F277W</td><td>1.07&Prime;</td><td>0.00&Prime;</td><td>0.116</td><td>0.0103</td><td>11.31</td><td>11.64</td><td>27.29</td><td>+0.46</td><td>+0.08</td><td>+0.50</td><td>1.68</td><td>-0.56</td></tr>
+<tr><td>318858</td><td>JWST</td><td>F115W</td><td>0.75&Prime;</td><td>0.00&Prime;</td><td>5.308</td><td>0.0273</td><td>194.55</td><td>201.00</td><td>24.55</td><td>+0.72</td><td>+0.21</td><td>-0.10</td><td>30.70</td><td>-3.72</td></tr>
+<tr><td>320233</td><td>JWST</td><td>F150W</td><td>0.00&Prime;</td><td>0.01&Prime;</td><td>2.246</td><td>0.0195</td><td>115.20</td><td>173.22</td><td>25.37</td><td>+0.69</td><td>+0.19</td><td>-0.13</td><td>14.80</td><td>-2.93</td></tr>
+<tr><td>371996</td><td>HST</td><td>F814W</td><td>1.11&Prime;</td><td>0.00&Prime;</td><td>0.219</td><td>0.0024</td><td>91.81</td><td>76.12</td><td>24.81</td><td>+0.57</td><td>-0.09</td><td>-0.09</td><td>2.18</td><td>-0.84</td></tr>
+<tr><td>435613</td><td>JWST</td><td>F115W</td><td>0.26&Prime;</td><td>0.00&Prime;</td><td>2.117</td><td>0.0344</td><td>61.50</td><td>15.39</td><td>25.76</td><td>+0.72</td><td>+0.01</td><td>-0.09</td><td>12.37</td><td>-2.73</td></tr>
+<tr><td>435769</td><td>JWST</td><td>F115W</td><td>0.26&Prime;</td><td>0.00&Prime;</td><td>1.867</td><td>0.0324</td><td>57.60</td><td>35.04</td><td>26.14</td><td>+0.84</td><td>+0.32</td><td>+0.02</td><td>7.66</td><td>-2.21</td></tr>
+<tr><td>468896</td><td>JWST</td><td>F150W</td><td>0.42&Prime;</td><td>0.00&Prime;</td><td>0.874</td><td>0.0234</td><td>37.30</td><td>9.44</td><td>26.53</td><td>+0.66</td><td>-0.23</td><td>+0.02</td><td>6.86</td><td>-2.09</td></tr>
+<tr><td>471959</td><td>HST</td><td>F814W</td><td>0.52&Prime;</td><td>0.01&Prime;</td><td>0.316</td><td>0.0028</td><td>113.71</td><td>33.09</td><td>24.35</td><td>+0.49</td><td>+0.00</td><td>-0.05</td><td>3.51</td><td>-1.36</td></tr>
+</tbody></table>
+<h2>Full multi-band breakdown</h2>
+<table><thead><tr><th>ID</th><th>band</th><th>sep_sn</th><th>peak</th><th>bg_std</th><th>peak/bg_std</th><th>sharp</th><th>rnd1</th><th>rnd2</th><th>flux</th><th>mag</th></tr></thead><tbody>
+<tr><td class='best'>130972</td><td class='best'>F814W</td><td class='best'>0.01&Prime;</td><td class='best'>0.095</td><td class='best'>0.0019</td><td class='best'>49.45</td><td class='best'>+0.56</td><td class='best'>+0.03</td><td class='best'>-0.17</td><td class='best'>1.15</td><td class='best'>-0.15</td></tr>
+<tr><td class='best'>371996</td><td class='best'>F814W</td><td class='best'>0.00&Prime;</td><td class='best'>0.219</td><td class='best'>0.0024</td><td class='best'>91.81</td><td class='best'>+0.57</td><td class='best'>-0.09</td><td class='best'>-0.09</td><td class='best'>2.18</td><td class='best'>-0.84</td></tr>
+<tr><td class='best'>471959</td><td class='best'>F814W</td><td class='best'>0.01&Prime;</td><td class='best'>0.316</td><td class='best'>0.0028</td><td class='best'>113.71</td><td class='best'>+0.49</td><td class='best'>+0.00</td><td class='best'>-0.05</td><td class='best'>3.51</td><td class='best'>-1.36</td></tr>
+<tr><td class='best'>63924</td><td class='best'>NIR-Y</td><td class='best'>0.00&Prime;</td><td class='best'>7.080</td><td class='best'>0.2801</td><td class='best'>25.27</td><td class='best'>+0.45</td><td class='best'>+0.12</td><td class='best'>-0.19</td><td class='best'>180.39</td><td class='best'>-5.64</td></tr>
+<tr><td>63924</td><td>NIR-J</td><td>0.05&Prime;</td><td>5.542</td><td>0.4081</td><td>13.58</td><td>+0.45</td><td>-0.10</td><td>-0.30</td><td>158.09</td><td>-5.50</td></tr>
+<tr><td>63924</td><td>NIR-H</td><td>0.27&Prime;</td><td>3.401</td><td>0.4542</td><td>7.49</td><td>+0.45</td><td>+0.06</td><td>-0.83</td><td>120.23</td><td>-5.20</td></tr>
+<tr><td class='best'>318858</td><td class='best'>F115W</td><td class='best'>0.00&Prime;</td><td class='best'>5.308</td><td class='best'>0.0273</td><td class='best'>194.55</td><td class='best'>+0.72</td><td class='best'>+0.21</td><td class='best'>-0.10</td><td class='best'>30.70</td><td class='best'>-3.72</td></tr>
+<tr><td>318858</td><td>F150W</td><td>0.01&Prime;</td><td>3.186</td><td>0.0211</td><td>150.77</td><td>+0.64</td><td>-0.37</td><td>-0.11</td><td>22.64</td><td>-3.39</td></tr>
+<tr><td>318858</td><td>F277W</td><td>0.00&Prime;</td><td>0.552</td><td>0.0063</td><td>87.41</td><td>+0.47</td><td>-0.33</td><td>-0.28</td><td>6.91</td><td>-2.10</td></tr>
+<tr><td>318858</td><td>F444W</td><td>0.01&Prime;</td><td>0.117</td><td>0.0073</td><td>16.16</td><td>+0.48</td><td>-0.19</td><td>+0.08</td><td>3.14</td><td>-1.24</td></tr>
+<tr><td>320233</td><td>F115W</td><td>0.01&Prime;</td><td>2.261</td><td>0.0244</td><td>92.74</td><td>+0.69</td><td>+0.25</td><td>-0.12</td><td>14.89</td><td>-2.93</td></tr>
+<tr><td class='best'>320233</td><td class='best'>F150W</td><td class='best'>0.01&Prime;</td><td class='best'>2.246</td><td class='best'>0.0195</td><td class='best'>115.20</td><td class='best'>+0.69</td><td class='best'>+0.19</td><td class='best'>-0.13</td><td class='best'>14.80</td><td class='best'>-2.93</td></tr>
+<tr><td>320233</td><td>F277W</td><td>0.01&Prime;</td><td>0.546</td><td>0.0065</td><td>84.16</td><td>+0.41</td><td>-0.08</td><td>+0.17</td><td>7.26</td><td>-2.15</td></tr>
+<tr><td>320233</td><td>F444W</td><td>0.01&Prime;</td><td>0.178</td><td>0.0076</td><td>23.46</td><td>+0.40</td><td>+0.04</td><td>-0.01</td><td>4.74</td><td>-1.69</td></tr>
+<tr><td>246188</td><td>F115W</td><td>0.00&Prime;</td><td>2.830</td><td>0.0260</td><td>108.70</td><td>+0.77</td><td>+0.09</td><td>-0.09</td><td>17.70</td><td>-3.12</td></tr>
+<tr><td>246188</td><td>F150W</td><td>0.00&Prime;</td><td>2.264</td><td>0.0212</td><td>106.73</td><td>+0.75</td><td>+0.10</td><td>-0.03</td><td>16.48</td><td>-3.04</td></tr>
+<tr><td class='best'>246188</td><td class='best'>F277W</td><td class='best'>0.33&Prime;</td><td class='best'>9.863</td><td class='best'>0.0085</td><td class='best'>1156.89</td><td class='best'>+0.36</td><td class='best'>+0.08</td><td class='best'>-0.11</td><td class='best'>171.92</td><td class='best'>-5.59</td></tr>
+<tr><td>246188</td><td>F444W</td><td>0.17&Prime;</td><td>0.973</td><td>0.0099</td><td>98.12</td><td>+0.48</td><td>-0.79</td><td>+0.32</td><td>43.12</td><td>-4.09</td></tr>
+<tr><td>296673</td><td>F115W</td><td>0.65&Prime;</td><td>0.121</td><td>0.0335</td><td>3.61</td><td>+0.49</td><td>+0.47</td><td>+0.99</td><td>1.42</td><td>-0.38</td></tr>
+<tr><td>296673</td><td>F150W</td><td>0.01&Prime;</td><td>0.272</td><td>0.0268</td><td>10.15</td><td>+0.62</td><td>+0.44</td><td>+0.03</td><td>2.28</td><td>-0.89</td></tr>
+<tr><td class='best'>296673</td><td class='best'>F277W</td><td class='best'>0.00&Prime;</td><td class='best'>0.116</td><td class='best'>0.0103</td><td class='best'>11.31</td><td class='best'>+0.46</td><td class='best'>+0.08</td><td class='best'>+0.50</td><td class='best'>1.68</td><td class='best'>-0.56</td></tr>
+<tr><td>296673</td><td>F444W</td><td>0.09&Prime;</td><td>0.042</td><td>0.0115</td><td>3.65</td><td>+0.43</td><td>+0.93</td><td>+0.80</td><td>1.30</td><td>-0.28</td></tr>
+<tr><td class='best'>435613</td><td class='best'>F115W</td><td class='best'>0.00&Prime;</td><td class='best'>2.117</td><td class='best'>0.0344</td><td class='best'>61.50</td><td class='best'>+0.72</td><td class='best'>+0.01</td><td class='best'>-0.09</td><td class='best'>12.37</td><td class='best'>-2.73</td></tr>
+<tr><td>435613</td><td>F150W</td><td>0.00&Prime;</td><td>1.685</td><td>0.0275</td><td>61.23</td><td>+0.68</td><td>+0.02</td><td>-0.11</td><td>12.25</td><td>-2.72</td></tr>
+<tr><td>435613</td><td>F277W</td><td>0.15&Prime;</td><td>0.566</td><td>0.0096</td><td>59.05</td><td>+0.34</td><td>+0.69</td><td>-0.31</td><td>11.11</td><td>-2.61</td></tr>
+<tr><td>435613</td><td>F444W</td><td>0.16&Prime;</td><td>0.415</td><td>0.0109</td><td>38.18</td><td>+0.31</td><td>+0.92</td><td>+0.12</td><td>15.86</td><td>-3.00</td></tr>
+<tr><td class='best'>435769</td><td class='best'>F115W</td><td class='best'>0.00&Prime;</td><td class='best'>1.867</td><td class='best'>0.0324</td><td class='best'>57.60</td><td class='best'>+0.84</td><td class='best'>+0.32</td><td class='best'>+0.02</td><td class='best'>7.66</td><td class='best'>-2.21</td></tr>
+<tr><td>435769</td><td>F150W</td><td>0.01&Prime;</td><td>1.143</td><td>0.0256</td><td>44.56</td><td>+0.71</td><td>+0.41</td><td>+0.11</td><td>7.12</td><td>-2.13</td></tr>
+<tr><td>435769</td><td>F277W</td><td>0.03&Prime;</td><td>0.260</td><td>0.0092</td><td>28.22</td><td>+0.47</td><td>-0.25</td><td>-0.31</td><td>3.46</td><td>-1.35</td></tr>
+<tr><td>435769</td><td>F444W</td><td>0.07&Prime;</td><td>0.121</td><td>0.0107</td><td>11.36</td><td>+0.35</td><td>-0.39</td><td>-0.18</td><td>4.35</td><td>-1.60</td></tr>
+<tr><td>468896</td><td>F115W</td><td>0.00&Prime;</td><td>0.804</td><td>0.0291</td><td>27.67</td><td>+0.68</td><td>-0.04</td><td>+0.09</td><td>6.36</td><td>-2.01</td></tr>
+<tr><td class='best'>468896</td><td class='best'>F150W</td><td class='best'>0.00&Prime;</td><td class='best'>0.874</td><td class='best'>0.0234</td><td class='best'>37.30</td><td class='best'>+0.66</td><td class='best'>-0.23</td><td class='best'>+0.02</td><td class='best'>6.86</td><td class='best'>-2.09</td></tr>
+<tr><td>468896</td><td>F277W</td><td>0.01&Prime;</td><td>0.264</td><td>0.0105</td><td>25.01</td><td>+0.35</td><td>-0.04</td><td>+0.03</td><td>4.67</td><td>-1.67</td></tr>
+<tr><td>468896</td><td>F444W</td><td>0.10&Prime;</td><td>0.176</td><td>0.0116</td><td>15.11</td><td>+0.50</td><td>-0.19</td><td>-0.90</td><td>6.12</td><td>-1.97</td></tr>
+</tbody></table>
+</div></body></html>
