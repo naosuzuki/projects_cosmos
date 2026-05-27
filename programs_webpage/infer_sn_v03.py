@@ -534,11 +534,15 @@ def update_outputs(N, pid, psrc, ra, dec, th, tj, te, in_h, in_j, in_e, threshol
     for cand_no, i in enumerate(sn_idx, start=1):
         det_name = which[i]
         bands_for_det = bands_per_label.get(det_name, [])
-        # Saturation guard: REJECT if ANY band (across all surveys) shows
-        # mag < MAG_FLOOR with finite detection (snr ≥ 3). A real SN at
-        # mag<MAG_FLOOR in ANY band means we're sitting on a bright star.
+        # Saturation guard: REJECT if the source's mag in any HIGH-RESOLUTION
+        # band (HST F814W / JWST / Euclid VIS — pixel scale 30-100 mas) is
+        # brighter than MAG_FLOOR with finite detection (snr ≥ 3). NISP YJH
+        # bands are EXCLUDED because their 300-mas aperture sums host-galaxy
+        # flux, giving mag 17-19 even for normal galaxies — that's not
+        # saturation, just host-blending.
+        SAT_BANDS = ["F814W","F115W","F150W","F277W","F444W","VIS"]
         saturated = False
-        for b in CSV_BANDS:
+        for b in SAT_BANDS:
             mv = float(MAG[b][i]); sv = float(SNR[b][i])
             if np.isfinite(mv) and 0 < mv < MAG_FLOOR and np.isfinite(sv) and sv >= 3.0:
                 saturated = True; break

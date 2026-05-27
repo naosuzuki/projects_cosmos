@@ -1,0 +1,32 @@
+# Step 5 v03 training summary
+# Trained: 2026-05-27 14:13:47
+# Device: mps  Epochs: 30  Batch: 256
+
+survey  known    rec   recall    P_thr    pos   total
+   hst      3      1    33.3%   0.9963    183    5183
+  jwst     13      9    69.2%   0.9981    793    5793
+  nisp      1      0     0.0%   0.3929     61    5061
+
+
+=== hst per-SN LOO scores ===
+  SN  130972  P=0.5046  thr=0.9963  MISSED
+  SN  371996  P=0.9888  thr=0.9963  MISSED
+  SN  471959  P=1.0000  thr=0.9963  RECOVERED
+
+=== jwst per-SN LOO scores ===
+  SN    9748  P=1.0000  thr=0.9981  RECOVERED
+  SN   19931  P=0.9940  thr=0.9981  MISSED
+  SN   53669  P=0.9999  thr=0.9981  RECOVERED
+  SN   63919  P=1.0000  thr=0.9981  RECOVERED
+  SN   78323  P=1.0000  thr=0.9981  RECOVERED
+  SN  246188  P=1.0000  thr=0.9981  RECOVERED
+  SN  296673  P=1.0000  thr=0.9981  RECOVERED
+  SN  318858  P=0.9481  thr=0.9981  MISSED
+  SN  320233  P=1.0000  thr=0.9981  RECOVERED
+  SN  430352  P=0.9967  thr=0.9981  MISSED
+  SN  435613  P=0.9761  thr=0.9981  MISSED
+  SN  435769  P=0.9984  thr=0.9981  RECOVERED
+  SN  468896  P=0.9981  thr=0.9981  RECOVERED
+
+=== nisp per-SN LOO scores ===
+  SN   63924  P=0.3408  thr=0.3929  MISSED
