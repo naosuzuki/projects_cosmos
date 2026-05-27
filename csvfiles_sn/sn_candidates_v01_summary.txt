@@ -1,0 +1,39 @@
+# SN candidate source catalog v01 — build summary
+# Built: 2026-05-27 06:56:15  (5.1 sec total)
+# Source: /Users/suzuki/github/projects_cosmos/csvfiles_star/master_or_catalog_v01.parquet
+# Output: /Users/suzuki/github/projects_cosmos/csvfiles_sn/sn_candidates_v01.parquet
+
+## Exclusion rules
+EX1: is_agn_qso == True
+EX2: gaia_pmra and gaia_pmdec both finite (Gaia DR3 PM)
+EX3: any of 5 cross-mission pm_flag_* == "gaia_consistent"
+
+## Row counts
+Total in master:                 1,132,959
+  Excluded:                         15,183  (1.34%)
+  Kept (SN candidates):          1,117,776  (98.66%)
+
+## Per-rule exclusion counts
+EX1 is_agn_qso True:                 5,592
+EX2 Gaia PM star:                    8,978
+EX3 xmission gaia_consistent:        1,472
+
+## Per-pair gaia_consistent counts (component of EX3)
+  HST_Euclid_VIS                 494
+  HST_Euclid_NISP                714
+  HST_JWST                       756
+  JWST_Euclid_VIS                107
+  JWST_Euclid_NISP               106
+
+## Overlap audit (Venn breakdown)
+  EX1 only:                          5,554
+  EX2 only:                          8,151
+  EX3 only:                            646
+  EX1 ∩ EX2:                            33
+  EX1 ∩ EX3:                            32
+  EX2 ∩ EX3:                           821
+  EX1 ∩ EX2 ∩ EX3:                      27
+
+## Schema
+Columns: 292  (same as input)
+File size: 398.1 MB  (zstd parquet)
