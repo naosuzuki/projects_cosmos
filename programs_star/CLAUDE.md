@@ -247,29 +247,51 @@ indicator even when explicit PM measurement is broken (B3, B5).
 
 ### B4. New aggregate column `is_likely_star` (v02 master)
 
-Define `is_likely_star = (
-    is_agn_qso == False                                # not an AGN/QSO
+**FINAL implemented definition** (in `59_master_or_catalog_v02.py`, verified
+to give 0/12 false-positives on the 12 known SNe present in master, and
+~9% star fraction overall which is realistic for COSMOS):
+
+```
+is_likely_star = (
+    NOT is_agn_qso                                     # not an AGN/QSO
     AND (
-        gaia_source_id is not NaN                      # in Gaia
-        OR  cat_class_star_hst > 0.8                   # HST class_star
-        OR  cat_mu_class_hst == 1                      # HST mu_class
-        OR  cat_phz_classification_vis  == 2           # Euclid PHZ STAR (VIS)
-        OR  cat_phz_classification_nisp == 2           # Euclid PHZ STAR (NISP)
-        OR  cat_point_like_prob_vis  > 0.9             # Euclid PSF prob (VIS)
-        OR  cat_point_like_prob_nisp > 0.9             # Euclid PSF prob (NISP)
-        OR  cat_mag_VIS_vis < 17                       # bright VIS → almost always star
-        OR  hst_saturated_likely                        # B3 condition
-        OR  is_point_source == True                     # existing flag
-        OR  (
-              any(pm_flag_<pair> ∈ {ok, gaia_consistent})
-              AND any(|pmtot_<pair>| > 5*pmtot_err_<pair> AND |pmtot_<pair>| > 5 mas/yr)
-            )                                           # cross-mission PM significant
+        gaia_source_id present                          # Gaia anchor (any)
+        OR cat_class_star_hst > 0.8                     # SExtractor stellarity
+        OR cat_phz_classification_vis  == 1             # Euclid PHZ: 1=STAR
+        OR cat_phz_classification_nisp == 1             #   ↑ verified by counts
+        OR cat_point_like_prob_vis  > 0.9
+        OR cat_point_like_prob_nisp > 0.9
+        OR cat_mag_VIS_vis  < 17                        # bright VIS → likely star
+        OR cat_mag_F814W_hst < 18                       # bright F814W → likely star
+        OR hst_saturated_likely                          # B3 condition
+        OR pm_significant                                # see below
     )
-)`
+)
+```
+
+**Encoding corrections made during implementation:**
+1. **Euclid `phz_classification`: 1=STAR, 2=GALAXY, 3=QSO** (not the
+   reverse I initially assumed). Verified from distribution: 58% of
+   sources have phz=2, only ~3% have phz=1 — consistent with
+   galaxy-dominated deep survey.
+2. **HST `cat_mu_class_hst` encoding is inverted from naïve "1=star"**:
+   86% of HST rows have mu_class=1 (must be "extended/galaxy"); only 12%
+   have mu_class=2 (probably star). v02 does NOT use mu_class; relies
+   on numeric cat_class_star_hst > 0.8 instead.
+
+**EXCLUDED from is_likely_star** (deliberately):
+- `is_point_source` — SNe ARE point sources by definition; including this
+  would exclude real SN candidates. The CNN + morphology + cross-survey
+  asymmetry rules downstream discriminate SN-like vs star-like.
+
+**`pm_significant` definition** (tiered to avoid astrometric residuals):
+- `pm_flag = "gaia_consistent"`: trust at 3σ + 5 mas/yr
+- `pm_flag = "ok"`: stricter (10σ AND 20 mas/yr) — without Gaia anchor,
+  cross-mission centroid residuals can fake ~5 mas/yr signals
+- `pm_flag` other (None, inconsistent_with_gaia, etc.): ignored
 
 Downstream SN-finder uses `is_likely_star OR is_agn_qso` as the single
-star/AGN exclusion criterion.  All known SNe should have
-`is_likely_star = False` (verify with the 17 in `lookup_sn17_v32.csv`).
+star/AGN exclusion criterion.
 
 ### B5. `pmtot_*` cross-mission values look small even when raw position
 deltas indicate large motion (cand_26: raw positions imply ~24 mas/yr,
