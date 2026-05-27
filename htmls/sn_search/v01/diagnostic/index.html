@@ -1,0 +1,64 @@
+<!doctype html><html><head><title>v01 top SN candidates — visual inspection</title>
+<style>body{font-family:serif;background:#fafafa;color:#222}
+.wrap{max-width:1700px;margin:0 auto;padding:20px}
+img{width:100%;display:block;border:1px solid #ccc;margin-bottom:18px}
+h1{color:#333} h2{margin-top:30px}
+.meta{font-family:monospace;font-size:12px;background:#eee;padding:6px 10px;border-radius:3px}
+.bug{background:#fee;border:1px solid #d00;padding:10px 14px;margin:14px 0}
+</style></head><body><div class='wrap'>
+<h1>v01 — top 5 SN candidates &mdash; visual inspection</h1>
+<p style='font-size:13px;color:#666'>Generated 2026-05-27 10:09:08
+ &mdash; from <code>tbl_sn_candidates_v01.csv</code> (4,960 candidates total).</p>
+<div class='bug'><b>Note on v01:</b> this run had a labeling bug (all 17 known SNe were marked positive in every survey, instead of only their discovery survey). Top candidates are likely dominated by host-galaxy false positives. v02 with corrected per-survey labels is pending.</div>
+<p>Each row: <b>HST F814W</b> | <b>JWST F115W / F150W / F277W / F444W</b> | <b>Euclid VIS / NIR-Y / NIR-J / NIR-H</b>. <span style='color:#0aa'>Cyan crosshair</span> = candidate SN position. 1″ scale bar at bottom-left of each panel.</p>
+<h2>cand_00001</h2>
+<div class='meta'>
+primary_id = EuclidID_1499984999027691008<br>
+telescope (detected by CNN) = <b>HST</b><br>
+RA = 149.9984999, Dec = 2.7690984<br>
+hst_tile = 102, jwst_tile = —, euclid_tile = 101547135<br>
+best_band = F814W (SNR=11.61); composite_confidence = 1.0000<br>
+per-survey CNN P: hst=1.0000, jwst=nan, vis=0.0000, nisp=0.0000
+</div>
+<img src='cand_00001.png'>
+<h2>cand_00002</h2>
+<div class='meta'>
+primary_id = HSTID_177<br>
+telescope (detected by CNN) = <b>HST</b><br>
+RA = 149.6603000, Dec = 2.0522820<br>
+hst_tile = 056, jwst_tile = —, euclid_tile = 101542815<br>
+best_band = F814W (SNR=50.77); composite_confidence = 1.0000<br>
+per-survey CNN P: hst=1.0000, jwst=nan, vis=0.0000, nisp=0.0000
+</div>
+<img src='cand_00002.png'>
+<h2>cand_00003</h2>
+<div class='meta'>
+primary_id = EuclidID_1500432953021024512<br>
+telescope (detected by CNN) = <b>HST</b><br>
+RA = 150.0432953, Dec = 2.1024594<br>
+hst_tile = 054, jwst_tile = A3, euclid_tile = 101542817<br>
+best_band = F814W (SNR=1.15); composite_confidence = 1.0000<br>
+per-survey CNN P: hst=1.0000, jwst=0.0000, vis=0.0000, nisp=0.0000
+</div>
+<img src='cand_00003.png'>
+<h2>cand_00004</h2>
+<div class='meta'>
+primary_id = EuclidID_1498690843016495360<br>
+telescope (detected by CNN) = <b>EUCLID-NISP</b><br>
+RA = 149.8741350, Dec = 1.6488270<br>
+hst_tile = 031, jwst_tile = —, euclid_tile = 101541376<br>
+best_band = H (SNR=96.06); composite_confidence = 1.0000<br>
+per-survey CNN P: hst=0.0000, jwst=nan, vis=0.0000, nisp=1.0000
+</div>
+<img src='cand_00004.png'>
+<h2>cand_00005</h2>
+<div class='meta'>
+primary_id = HSTID_325<br>
+telescope (detected by CNN) = <b>EUCLID-NISP</b><br>
+RA = 149.6653980, Dec = 2.1614920<br>
+hst_tile = 068, jwst_tile = —, euclid_tile = 101544255<br>
+best_band = H (SNR=98.46); composite_confidence = 1.0000<br>
+per-survey CNN P: hst=0.0000, jwst=nan, vis=0.0000, nisp=1.0000
+</div>
+<img src='cand_00005.png'>
+</div></body></html>
