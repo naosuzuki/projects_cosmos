@@ -1,0 +1,123 @@
+<!doctype html><html><head><title>SN search v01</title>
+<meta http-equiv='refresh' content='30'>
+<style>body{font-family:serif;background:#fafafa}
+.wrap{max-width:1300px;margin:0 auto;padding:20px}
+table{border-collapse:collapse;font-family:monospace;font-size:12px}
+th,td{border:1px solid #ccc;padding:3px 6px;text-align:right}
+th{background:#eee} td.lab{text-align:left;font-weight:bold}
+h1{color:#333} .det{background:#e0f5e0}
+.prog{background:#fff5b0;padding:8px 12px;border:1px solid #d4a017;margin:10px 0}
+</style></head><body><div class='wrap'>
+<h1>SN search v03 &mdash; 1-of-N detection across HST / JWST / Euclid-VIS / Euclid-NISP</h1>
+<p>Last update: 2026-05-27 15:21:49 (running — refreshes every 30s)</p>
+<div class='prog'>
+<b>Progress:</b><br>
+HST processed: 988,837 ✔<br>
+JWST processed: 495,532 ✔<br>
+Euclid VIS processed: 530,062 ✔<br>
+Euclid NISP processed: 981,933 ✔<br>
+<br><b>Sources fully evaluated</b> (all covered surveys processed): 981,933<br>
+<b>1-of-N raw detections:</b> 2,815<br>
+&nbsp;&nbsp;&minus; saturation guard (any-band mag&lt;21): 1,848<br>
+&nbsp;&nbsp;&minus; morphology G1-G4 rejects: 860<br>
+&nbsp;&nbsp;&minus; cross-band consistency rejects: 6<br>
+&nbsp;&nbsp;&minus; NaN/edge veto rejects: 0<br>
+&nbsp;&nbsp;&minus; SNR&lt;5 rejects: 11<br>
+&nbsp;&nbsp;&minus; mag&lt;21 rejects: 0<br>
+<b>SN candidates after v03 rules:</b> <span style='color:#d80'>90</span>
+</div>
+<p>Per-survey detections (overall, may include incomplete-coverage rows): HST=1,053, JWST=1,190, VIS=969, NISP=765.</p>
+<p>Thresholds (LOO @ FPR=10<sup>&minus;3</sup>): HST&ge;0.9963, JWST&ge;0.9981, VIS&ge;0.6264, NISP&ge;0.3929.</p>
+<p>Top 90 candidates (sorted by composite confidence):</p>
+<table><thead><tr><th>rank</th><th>id</th><th>tel</th><th>ra</th><th>dec</th><th>comp_conf</th><th>best band</th><th>best snr</th><th>P_hst</th><th>P_jwst</th><th>P_vis</th><th>P_nisp</th></tr></thead><tbody>
+<tr><td>1</td><td>513058</td><td class='lab'>HST</td><td>150.3100721</td><td>2.4312752</td><td>0.9983</td><td>F814W</td><td>7.03</td><td>0.9983</td><td>0.0000</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>2</td><td>399657</td><td class='lab'>HST</td><td>149.9858071</td><td>2.5736461</td><td>0.9982</td><td>F814W</td><td>9.42</td><td>0.9983</td><td>0.0001</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>3</td><td>685966</td><td class='lab'>HST</td><td>150.2121757</td><td>2.3335985</td><td>0.9231</td><td>F814W</td><td>8.79</td><td>0.9994</td><td>0.0260</td><td>nan</td><td>0.0763</td></tr>
+<tr><td>4</td><td>270536</td><td class='lab'>HST</td><td>149.9937459</td><td>1.8442988</td><td>0.8968</td><td>F814W</td><td>9.09</td><td>0.9976</td><td>0.0247</td><td>0.1011</td><td>0.0794</td></tr>
+<tr><td>5</td><td>270707</td><td class='lab'>HST</td><td>149.9884484</td><td>1.8477808</td><td>0.8964</td><td>F814W</td><td>10.82</td><td>0.9971</td><td>0.0000</td><td>0.1011</td><td>0.0794</td></tr>
+<tr><td>6</td><td>55819</td><td class='lab'>HST</td><td>149.9813793</td><td>2.1805767</td><td>0.8489</td><td>F814W</td><td>16.28</td><td>0.9978</td><td>0.0438</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>7</td><td>469792</td><td class='lab'>HST</td><td>150.2623840</td><td>2.4226254</td><td>0.8088</td><td>F814W</td><td>12.72</td><td>0.9993</td><td>0.1906</td><td>nan</td><td>0.0001</td></tr>
+<tr><td>8</td><td>231832</td><td class='lab'>HST</td><td>149.8055540</td><td>1.9330946</td><td>0.6953</td><td>F814W</td><td>13.61</td><td>0.9966</td><td>0.3023</td><td>0.0214</td><td>0.0794</td></tr>
+<tr><td>9</td><td>311448</td><td class='lab'>HST</td><td>150.1578616</td><td>1.7936601</td><td>0.6594</td><td>F814W</td><td>15.73</td><td>0.9997</td><td>0.3404</td><td>0.1011</td><td>0.0794</td></tr>
+<tr><td>10</td><td>234031</td><td class='lab'>HST</td><td>149.8969538</td><td>1.9138123</td><td>0.6493</td><td>F814W</td><td>5.10</td><td>0.9986</td><td>0.0000</td><td>0.3498</td><td>0.0794</td></tr>
+<tr><td>11</td><td>313441</td><td class='lab'>HST</td><td>150.1696551</td><td>1.8048687</td><td>0.5663</td><td>F814W</td><td>22.41</td><td>0.9974</td><td>0.0019</td><td>0.1011</td><td>0.0794</td></tr>
+<tr><td>12</td><td>595649</td><td class='lab'>HST</td><td>149.8449154</td><td>2.4337258</td><td>0.5533</td><td>F814W</td><td>15.62</td><td>0.9967</td><td>0.4449</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>13</td><td>271684</td><td class='lab'>HST</td><td>150.0186643</td><td>1.8463708</td><td>0.5253</td><td>F814W</td><td>28.52</td><td>0.9989</td><td>0.0000</td><td>0.1011</td><td>0.0794</td></tr>
+<tr><td>14</td><td>470201</td><td class='lab'>HST</td><td>150.2715541</td><td>2.4222559</td><td>0.4639</td><td>F814W</td><td>8.13</td><td>0.9996</td><td>0.5359</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>15</td><td>470524</td><td class='lab'>HST</td><td>150.2763760</td><td>2.4227930</td><td>0.3978</td><td>F814W</td><td>19.72</td><td>0.9973</td><td>0.5393</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>16</td><td>335029</td><td class='lab'>EUCLID-VIS</td><td>150.1352561</td><td>1.9882827</td><td>0.3962</td><td>VIS</td><td>47.36</td><td>0.0329</td><td>0.0040</td><td>0.7084</td><td>0.0550</td></tr>
+<tr><td>17</td><td>470334</td><td class='lab'>HST</td><td>150.2778224</td><td>2.4209117</td><td>0.3420</td><td>F814W</td><td>10.18</td><td>0.9993</td><td>0.6578</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>18</td><td>294186</td><td class='lab'>HST</td><td>150.0338858</td><td>2.0132281</td><td>0.2928</td><td>F814W</td><td>33.06</td><td>0.9978</td><td>0.0000</td><td>0.1112</td><td>0.0003</td></tr>
+<tr><td>19</td><td>EuclidID_1497138805019650304</td><td class='lab'>HST</td><td>149.7138806</td><td>1.9650233</td><td>0.2794</td><td>F814W</td><td>23.27</td><td>0.9969</td><td>0.6251</td><td>0.0003</td><td>0.0794</td></tr>
+<tr><td>20</td><td>389116</td><td class='lab'>HST</td><td>149.9155871</td><td>2.5218277</td><td>0.2757</td><td>F814W</td><td>38.26</td><td>0.9992</td><td>0.3460</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>21</td><td>560151</td><td class='lab'>HST</td><td>150.4539502</td><td>2.4428552</td><td>0.2648</td><td>F814W</td><td>5.23</td><td>0.9970</td><td>0.7344</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>22</td><td>55483</td><td class='lab'>HST</td><td>149.9561176</td><td>2.1885639</td><td>0.2265</td><td>F814W</td><td>19.52</td><td>0.9997</td><td>0.6540</td><td>0.2083</td><td>0.0007</td></tr>
+<tr><td>23</td><td>362224</td><td class='lab'>HST</td><td>150.2511984</td><td>1.8643854</td><td>0.2161</td><td>F814W</td><td>43.18</td><td>0.9996</td><td>0.4108</td><td>0.0763</td><td>0.0000</td></tr>
+<tr><td>24</td><td>232547</td><td class='lab'>HST</td><td>149.8057746</td><td>1.9375360</td><td>0.2117</td><td>F814W</td><td>13.49</td><td>0.9974</td><td>0.7878</td><td>0.0000</td><td>0.0794</td></tr>
+<tr><td>25</td><td>330179</td><td class='lab'>HST</td><td>150.1368303</td><td>1.9483041</td><td>0.2116</td><td>F814W</td><td>9.25</td><td>0.9971</td><td>0.7878</td><td>0.3814</td><td>0.1434</td></tr>
+<tr><td>26</td><td>83552</td><td class='lab'>HST</td><td>150.0256742</td><td>2.0820379</td><td>0.1624</td><td>F814W</td><td>6.79</td><td>0.9969</td><td>0.8371</td><td>0.4065</td><td>0.0426</td></tr>
+<tr><td>27</td><td>661583</td><td class='lab'>HST</td><td>150.0741707</td><td>2.4325817</td><td>0.1570</td><td>F814W</td><td>7.99</td><td>0.9985</td><td>0.8427</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>28</td><td>192038</td><td class='lab'>HST</td><td>149.6791523</td><td>1.9857237</td><td>0.1430</td><td>F814W</td><td>23.25</td><td>0.9965</td><td>0.8565</td><td>0.1355</td><td>0.0000</td></tr>
+<tr><td>29</td><td>645192</td><td class='lab'>HST</td><td>150.0405791</td><td>2.4047573</td><td>0.0973</td><td>F814W</td><td>17.41</td><td>0.9990</td><td>0.8981</td><td>nan</td><td>0.0105</td></tr>
+<tr><td>30</td><td>303550</td><td class='lab'>HST</td><td>150.0734062</td><td>1.9161861</td><td>0.0864</td><td>F814W</td><td>11.88</td><td>0.9986</td><td>0.9135</td><td>0.0159</td><td>0.0000</td></tr>
+<tr><td>31</td><td>HSTID_616699</td><td class='lab'>HST</td><td>150.0159550</td><td>2.0280590</td><td>0.0847</td><td>F814W</td><td>41.45</td><td>0.9980</td><td>0.8084</td><td>0.0000</td><td>0.0000</td></tr>
+<tr><td>32</td><td>HSTID_686056</td><td class='lab'>JWST</td><td>150.1309220</td><td>2.5237440</td><td>0.0706</td><td>F150W</td><td>11.59</td><td>0.9274</td><td>0.9999</td><td>nan</td><td>0.0003</td></tr>
+<tr><td>33</td><td>731986</td><td class='lab'>HST</td><td>150.2792551</td><td>2.3245192</td><td>0.0651</td><td>F814W</td><td>17.74</td><td>0.9991</td><td>0.9236</td><td>nan</td><td>0.0003</td></tr>
+<tr><td>34</td><td>EuclidID_1499058069019171584</td><td class='lab'>EUCLID-VIS</td><td>149.9058069</td><td>1.9171674</td><td>0.0613</td><td>VIS</td><td>30.33</td><td>0.5172</td><td>0.2847</td><td>0.7032</td><td>0.0794</td></tr>
+<tr><td>35</td><td>239989</td><td class='lab'>HST</td><td>149.9319850</td><td>1.9424034</td><td>0.0591</td><td>F814W</td><td>6.45</td><td>0.9979</td><td>0.9407</td><td>0.1865</td><td>0.1058</td></tr>
+<tr><td>36</td><td>250981</td><td class='lab'>HST</td><td>149.8456488</td><td>2.0520143</td><td>0.0562</td><td>F814W</td><td>11.15</td><td>0.9981</td><td>0.9437</td><td>0.3617</td><td>0.1992</td></tr>
+<tr><td>37</td><td>EuclidID_1499058106019171584</td><td class='lab'>EUCLID-VIS</td><td>149.9058330</td><td>1.9171650</td><td>0.0560</td><td>VIS</td><td>22.85</td><td>0.7139</td><td>0.1106</td><td>0.7927</td><td>0.0794</td></tr>
+<tr><td>38</td><td>352822</td><td class='lab'>JWST</td><td>150.3035220</td><td>1.7662815</td><td>0.0558</td><td>F150W</td><td>8.53</td><td>0.9442</td><td>0.9994</td><td>0.1011</td><td>0.0794</td></tr>
+<tr><td>39</td><td>HSTID_725217</td><td class='lab'>HST</td><td>150.2008530</td><td>2.2105460</td><td>0.0515</td><td>F814W</td><td>14.97</td><td>0.9981</td><td>0.9484</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>40</td><td>56970</td><td class='lab'>HST</td><td>150.0120817</td><td>2.1772624</td><td>0.0514</td><td>F814W</td><td>5.30</td><td>0.9989</td><td>0.9485</td><td>nan</td><td>0.1872</td></tr>
+<tr><td>41</td><td>EuclidID_1502904649021806080</td><td class='lab'>HST</td><td>150.2904650</td><td>2.1806105</td><td>0.0489</td><td>F814W</td><td>6.76</td><td>0.9964</td><td>0.9509</td><td>nan</td><td>0.2730</td></tr>
+<tr><td>42</td><td>18052</td><td class='lab'>EUCLID-VIS</td><td>149.8013806</td><td>2.2523190</td><td>0.0427</td><td>VIS</td><td>11.74</td><td>0.9057</td><td>0.0123</td><td>0.9488</td><td>0.0001</td></tr>
+<tr><td>43</td><td>HSTID_639733</td><td class='lab'>EUCLID-VIS</td><td>150.0549660</td><td>1.9058990</td><td>0.0369</td><td>VIS</td><td>6.89</td><td>0.8949</td><td>0.9497</td><td>0.7344</td><td>0.0081</td></tr>
+<tr><td>44</td><td>232942</td><td class='lab'>JWST</td><td>149.9208346</td><td>1.8979977</td><td>0.0368</td><td>F150W</td><td>153.94</td><td>0.8118</td><td>0.9991</td><td>0.1011</td><td>0.0794</td></tr>
+<tr><td>45</td><td>HSTID_615732</td><td class='lab'>HST</td><td>150.0464170</td><td>2.0188090</td><td>0.0333</td><td>F814W</td><td>13.03</td><td>0.9980</td><td>0.9666</td><td>0.0000</td><td>0.0000</td></tr>
+<tr><td>46</td><td>164700</td><td class='lab'>HST</td><td>150.3404170</td><td>1.9897111</td><td>0.0297</td><td>F814W</td><td>14.63</td><td>0.9994</td><td>0.9703</td><td>0.0072</td><td>0.0212</td></tr>
+<tr><td>47</td><td>104892</td><td class='lab'>HST</td><td>150.2034298</td><td>2.1638599</td><td>0.0296</td><td>F814W</td><td>5.30</td><td>0.9983</td><td>0.9704</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>48</td><td>724754</td><td class='lab'>HST</td><td>150.2676827</td><td>2.2812906</td><td>0.0287</td><td>F814W</td><td>5.94</td><td>0.9983</td><td>0.9713</td><td>nan</td><td>0.3263</td></tr>
+<tr><td>49</td><td>207242</td><td class='lab'>EUCLID-VIS</td><td>149.8065637</td><td>2.0484841</td><td>0.0277</td><td>VIS</td><td>28.05</td><td>0.8486</td><td>0.0085</td><td>0.6295</td><td>0.0012</td></tr>
+<tr><td>50</td><td>577256</td><td class='lab'>EUCLID-VIS</td><td>149.8563219</td><td>2.3109921</td><td>0.0267</td><td>VIS</td><td>5.72</td><td>0.9636</td><td>0.5290</td><td>0.7325</td><td>0.1338</td></tr>
+<tr><td>51</td><td>681736</td><td class='lab'>HST</td><td>150.1742369</td><td>2.3175870</td><td>0.0265</td><td>F814W</td><td>6.28</td><td>0.9978</td><td>0.9734</td><td>nan</td><td>0.0453</td></tr>
+<tr><td>52</td><td>HSTID_413838</td><td class='lab'>HST</td><td>149.7569240</td><td>2.0716160</td><td>0.0252</td><td>F814W</td><td>16.11</td><td>0.9986</td><td>0.9747</td><td>0.2893</td><td>0.3561</td></tr>
+<tr><td>53</td><td>HSTID_775770</td><td class='lab'>JWST</td><td>150.2619350</td><td>1.9607890</td><td>0.0217</td><td>F150W</td><td>11.20</td><td>0.9783</td><td>0.9995</td><td>0.5848</td><td>0.0000</td></tr>
+<tr><td>54</td><td>EuclidID_1505203241024179968</td><td class='lab'>JWST</td><td>150.5203241</td><td>2.4179944</td><td>0.0206</td><td>F150W</td><td>23.09</td><td>0.9794</td><td>0.9985</td><td>nan</td><td>0.0281</td></tr>
+<tr><td>55</td><td>EuclidID_1497659867022284544</td><td class='lab'>EUCLID-VIS</td><td>149.7659868</td><td>2.2284573</td><td>0.0191</td><td>VIS</td><td>28.95</td><td>0.9620</td><td>0.5584</td><td>0.8171</td><td>0.0053</td></tr>
+<tr><td>56</td><td>EuclidID_1497659880022284544</td><td class='lab'>EUCLID-VIS</td><td>149.7659880</td><td>2.2284501</td><td>0.0181</td><td>VIS</td><td>28.61</td><td>0.9638</td><td>0.7116</td><td>0.8441</td><td>0.0107</td></tr>
+<tr><td>57</td><td>HSTID_10038154</td><td class='lab'>HST</td><td>149.7798534</td><td>1.9598557</td><td>0.0179</td><td>F814W</td><td>16.99</td><td>0.9969</td><td>0.9341</td><td>0.0183</td><td>0.0020</td></tr>
+<tr><td>58</td><td>HSTID_10027415</td><td class='lab'>HST</td><td>149.7798534</td><td>1.9598559</td><td>0.0179</td><td>F814W</td><td>16.92</td><td>0.9969</td><td>0.9341</td><td>0.0183</td><td>0.0020</td></tr>
+<tr><td>59</td><td>HSTID_752156</td><td class='lab'>HST</td><td>150.2277160</td><td>2.3967650</td><td>0.0178</td><td>F814W</td><td>7.09</td><td>0.9990</td><td>0.9822</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>60</td><td>88492</td><td class='lab'>EUCLID-VIS</td><td>150.1095941</td><td>2.0878112</td><td>0.0170</td><td>VIS</td><td>8.46</td><td>0.9772</td><td>0.7915</td><td>0.7466</td><td>0.0596</td></tr>
+<tr><td>61</td><td>123617</td><td class='lab'>EUCLID-VIS</td><td>150.2216989</td><td>2.0142609</td><td>0.0166</td><td>VIS</td><td>8.72</td><td>0.9758</td><td>0.6101</td><td>0.6852</td><td>0.1099</td></tr>
+<tr><td>62</td><td>437783</td><td class='lab'>HST</td><td>150.0891762</td><td>2.5397139</td><td>0.0156</td><td>F814W</td><td>9.56</td><td>0.9985</td><td>0.9844</td><td>nan</td><td>0.0543</td></tr>
+<tr><td>63</td><td>EuclidID_1504088218019370752</td><td class='lab'>HST</td><td>150.4088219</td><td>1.9370628</td><td>0.0133</td><td>F814W</td><td>11.84</td><td>0.9968</td><td>0.9866</td><td>0.3194</td><td>0.1600</td></tr>
+<tr><td>64</td><td>287544</td><td class='lab'>EUCLID-VIS</td><td>150.0323672</td><td>1.9634559</td><td>0.0131</td><td>VIS</td><td>19.33</td><td>0.9806</td><td>0.1931</td><td>0.8057</td><td>0.0108</td></tr>
+<tr><td>65</td><td>EuclidID_1499726813021222656</td><td class='lab'>EUCLID-VIS</td><td>149.9726814</td><td>2.1222782</td><td>0.0128</td><td>VIS</td><td>14.31</td><td>0.9810</td><td>0.9250</td><td>0.6757</td><td>0.1815</td></tr>
+<tr><td>66</td><td>EuclidID_1499726814021222656</td><td class='lab'>EUCLID-VIS</td><td>149.9726815</td><td>2.1222758</td><td>0.0128</td><td>VIS</td><td>14.30</td><td>0.9810</td><td>0.9440</td><td>0.6757</td><td>0.1815</td></tr>
+<tr><td>67</td><td>EuclidID_1500323532019634688</td><td class='lab'>EUCLID-VIS</td><td>150.0323532</td><td>1.9634602</td><td>0.0119</td><td>VIS</td><td>15.99</td><td>0.9799</td><td>0.1557</td><td>0.6937</td><td>0.0077</td></tr>
+<tr><td>68</td><td>87076</td><td class='lab'>EUCLID-VIS</td><td>150.1449186</td><td>2.0638873</td><td>0.0118</td><td>VIS</td><td>10.69</td><td>0.9805</td><td>0.0259</td><td>0.7367</td><td>0.0042</td></tr>
+<tr><td>69</td><td>84732</td><td class='lab'>HST</td><td>150.0946910</td><td>2.0648970</td><td>0.0112</td><td>F814W</td><td>8.16</td><td>0.9965</td><td>0.9887</td><td>0.1888</td><td>0.0000</td></tr>
+<tr><td>70</td><td>EuclidID_1503218855018091776</td><td class='lab'>EUCLID-VIS</td><td>150.3218855</td><td>1.8091902</td><td>0.0105</td><td>VIS</td><td>16.05</td><td>0.9312</td><td>0.0472</td><td>0.8702</td><td>0.0794</td></tr>
+<tr><td>71</td><td>EuclidID_1501727298018376448</td><td class='lab'>EUCLID-VIS</td><td>150.1727298</td><td>1.8376414</td><td>0.0104</td><td>VIS</td><td>7.25</td><td>0.8471</td><td>0.2930</td><td>0.6928</td><td>0.0794</td></tr>
+<tr><td>72</td><td>EuclidID_1503218900018091776</td><td class='lab'>EUCLID-VIS</td><td>150.3218901</td><td>1.8091868</td><td>0.0100</td><td>VIS</td><td>15.89</td><td>0.9264</td><td>0.0472</td><td>0.7678</td><td>0.0794</td></tr>
+<tr><td>73</td><td>395575</td><td class='lab'>HST</td><td>149.9694425</td><td>2.5474757</td><td>0.0099</td><td>F814W</td><td>7.66</td><td>0.9970</td><td>0.9900</td><td>nan</td><td>0.0082</td></tr>
+<tr><td>74</td><td>123365</td><td class='lab'>EUCLID-VIS</td><td>150.2342678</td><td>2.0080310</td><td>0.0098</td><td>VIS</td><td>13.51</td><td>0.9844</td><td>0.8710</td><td>0.6293</td><td>0.1649</td></tr>
+<tr><td>75</td><td>163825</td><td class='lab'>EUCLID-VIS</td><td>150.3130490</td><td>1.9918353</td><td>0.0091</td><td>VIS</td><td>10.37</td><td>0.9774</td><td>0.6378</td><td>0.6436</td><td>0.0439</td></tr>
+<tr><td>76</td><td>EuclidID_1499446395020780544</td><td class='lab'>EUCLID-VIS</td><td>149.9446396</td><td>2.0780460</td><td>0.0088</td><td>VIS</td><td>21.68</td><td>0.9826</td><td>0.0822</td><td>0.8236</td><td>0.0019</td></tr>
+<tr><td>77</td><td>EuclidID_1499446433020780544</td><td class='lab'>EUCLID-VIS</td><td>149.9446434</td><td>2.0780431</td><td>0.0086</td><td>VIS</td><td>19.60</td><td>0.9842</td><td>0.1139</td><td>0.8451</td><td>0.0004</td></tr>
+<tr><td>78</td><td>HSTID_733532</td><td class='lab'>HST</td><td>150.1983100</td><td>1.9854960</td><td>0.0062</td><td>F814W</td><td>8.10</td><td>0.9987</td><td>0.9938</td><td>0.0000</td><td>0.0000</td></tr>
+<tr><td>79</td><td>474270</td><td class='lab'>JWST</td><td>150.2294961</td><td>2.4659183</td><td>0.0051</td><td>F277W</td><td>30.86</td><td>0.9943</td><td>0.9991</td><td>nan</td><td>0.0005</td></tr>
+<tr><td>80</td><td>EuclidID_1501809627019293184</td><td class='lab'>EUCLID-VIS</td><td>150.1809627</td><td>1.9293236</td><td>0.0049</td><td>VIS</td><td>9.41</td><td>0.9913</td><td>0.4168</td><td>0.7633</td><td>0.0110</td></tr>
+<tr><td>81</td><td>329836</td><td class='lab'>EUCLID-VIS</td><td>150.1809593</td><td>1.9293207</td><td>0.0047</td><td>VIS</td><td>10.67</td><td>0.9913</td><td>0.4168</td><td>0.7013</td><td>0.0193</td></tr>
+<tr><td>82</td><td>282370</td><td class='lab'>EUCLID-VIS</td><td>150.0599417</td><td>1.9120664</td><td>0.0042</td><td>VIS</td><td>9.00</td><td>0.9917</td><td>0.7961</td><td>0.6510</td><td>0.0009</td></tr>
+<tr><td>83</td><td>351390</td><td class='lab'>JWST</td><td>150.3012924</td><td>1.7573344</td><td>0.0031</td><td>F150W</td><td>59.05</td><td>0.9926</td><td>0.9999</td><td>0.1011</td><td>0.0794</td></tr>
+<tr><td>84</td><td>91067</td><td class='lab'>EUCLID-VIS</td><td>150.1114092</td><td>2.1070520</td><td>0.0030</td><td>VIS</td><td>32.43</td><td>0.9876</td><td>0.0144</td><td>0.7431</td><td>0.0691</td></tr>
+<tr><td>85</td><td>EuclidID_1501113954021070336</td><td class='lab'>EUCLID-VIS</td><td>150.1113954</td><td>2.1070445</td><td>0.0026</td><td>VIS</td><td>29.99</td><td>0.9884</td><td>0.0714</td><td>0.7284</td><td>0.0708</td></tr>
+<tr><td>86</td><td>334878</td><td class='lab'>EUCLID-VIS</td><td>150.2321813</td><td>1.9508876</td><td>0.0018</td><td>VIS</td><td>9.68</td><td>0.9912</td><td>0.5229</td><td>0.6974</td><td>0.0032</td></tr>
+<tr><td>87</td><td>HSTID_10058115</td><td class='lab'>HST</td><td>150.5621210</td><td>2.4039311</td><td>0.0015</td><td>F814W</td><td>10.17</td><td>0.9986</td><td>0.9866</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>88</td><td>HSTID_10061073</td><td class='lab'>HST</td><td>150.5621207</td><td>2.4039313</td><td>0.0015</td><td>F814W</td><td>10.18</td><td>0.9986</td><td>0.9866</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>89</td><td>HSTID_10062020</td><td class='lab'>HST</td><td>150.4918492</td><td>2.4585676</td><td>0.0001</td><td>F814W</td><td>226.79</td><td>0.9996</td><td>0.9980</td><td>nan</td><td>0.0000</td></tr>
+<tr><td>90</td><td>HSTID_10075733</td><td class='lab'>HST</td><td>150.4918473</td><td>2.4585684</td><td>0.0001</td><td>F814W</td><td>222.14</td><td>0.9996</td><td>0.9980</td><td>nan</td><td>0.0000</td></tr>
+</tbody></table></div></body></html>

@@ -33,8 +33,89 @@ is a snapshot so we can compare progress across analysis revisions.</p>
 </div>
 
 <div class="ver">
-  <span class="coming">v02 &mdash; coming after revision</span>
-  <p class="meta">Will incorporate the 5 fixes above.</p>
+  <a href="v02/index.html">v02</a> &nbsp; <span class="meta">built 2026-05-26 &mdash; 1,800 candidates total (600 + 600 + 600, top by DAO SNR per category)</span>
+  <p>From-scratch DAO-photo pipeline on the raw mosaics (programs_star).
+  Per-tile WCS footprints + downsampled pixel-mask intersection
+  (HST F814W &cap; JWST F115W = 0.539 deg<sup>2</sup>); orphan list
+  restricted to that common region (orphans_v5).
+  Saturated-star veto (saturated_stars_v3 = DAO sat + mag-scaled Gaia
+  bright + per-band 99-pctl peak + local-bright neighbour) removes
+  diffraction-spike contaminants.
+  PM-aware cross-match adds Gaia-DR3-anchored pairs (pairs_*_v4) that
+  the brightness-aware radius misses for high-PM stars over the 19-yr
+  HST&rarr;Euclid baseline.</p>
+  <p class="meta">Cutouts: 5&Prime;.
+  JWST shown as two RGBs (F115/F150/F277 and F150/F277/F444);
+  Euclid NISP as Y/J/H RGB; HST F814W and Euclid VIS single-band.
+  DAO instrumental magnitudes (AB-calibrated mags coming in v03).</p>
+</div>
+
+<div class="ver">
+  <a href="v03/index.html">v03</a> &nbsp; <span class="meta">built 2026-05-26 &mdash; 1,800 candidates (600 per category) after catalog galaxy veto</span>
+  <p>Adds <b>catalog FWHM / ellipticity / star-galaxy-flag veto</b>:
+  cross-match each orphan to COSMOS-Web, Euclid MER DR1, HST ACS i-phot,
+  and COSMOS2020 within 0.5&Prime;.  Any match flagged as galaxy by
+  <code>phz_classification=2</code>, <code>mu_class=1</code>,
+  <code>ACS_MU_CLASS=1</code>, <code>lp_type=0</code>, or with
+  extended morphology (FWHM &gt; 1.5&times;PSF, ellipticity &gt; 0.30,
+  CW <code>flag_star=False</code>) is dropped.
+  336,225 v5 orphans &rarr; 131,273 v6 orphans (61% galaxy-vetoed).</p>
+  <p class="meta">Uses the original v01 sqrt+ManualInterval color recipe:
+  JWST RGB vmin=1e-4, vmax=center&times;0.85;
+  Euclid NISP RGB vmin=1e-5, vmax=center&times;1.2;
+  HST F814W / Euclid VIS single-band grayscale same recipe as v01.
+  Carbon-copy of <code>programs_jwst/03_make_sn_cutouts_jwst.py</code>
+  and <code>programs_euclid/03_make_sn_cutouts_euclid.py</code>.</p>
+</div>
+
+<div class="ver">
+  <a href="v06/index.html">v06</a> &nbsp; <span class="meta">built 2026-05-27 &mdash; 12,136 valid orphan-star candidates inside 0.5414 deg² common region (top 600 shown)</span>
+  <p>Implements the user's union-of-bands strict rule (2026-05-27):
+  <ul>
+    <li><b>Common region</b> = HST F814W &cap; JWST union (any of F115W/F150W/F277W/F444W) &cap; Euclid bbox = <b>0.5414 deg² = 1,949 arcmin²</b>.</li>
+    <li><b>HST F814W detection</b> required.</li>
+    <li><b>JWST detection in AT LEAST ONE</b> of F115W / F150W / F277W / F444W.  JWST star_id is the canonical ID (F115W preferred, falls back to F150W, F277W, F444W).</li>
+    <li><b>Euclid detection in AT LEAST ONE</b> of VIS / NIR-Y / NIR-J / NIR-H.</li>
+    <li>Image-extent veto: HST F814W second-moment FWHM &le; 0.214&Prime; AND ellip &le; 0.30.</li>
+    <li>Catalog galaxy veto (Euclid PHZ, HST mu_class, CW flag_star, COSMOS2020 lp_type).</li>
+  </ul>
+  </p>
+  <p class="meta">Funnel: 733k HST F814W good+sat &rarr; 229,331 in common region &rarr;
+  132,408 with both any-JWST and any-Euclid match &rarr; 12,242 after HST image-extent veto
+  &rarr; <b>12,136 after catalog galaxy veto</b>.  Top 600 by HST SNR shown in 6 pages.
+  Every thumbnail has a <span style="color:red">red crosshair</span> at the catalog position.</p>
+</div>
+
+<div class="ver" style="color:#999">
+  <s><a href="v05/index.html">v05</a></s> &nbsp; <span class="meta">built 2026-05-26 &mdash; superseded by v06.  Required F115W detection only; v06 accepts any JWST band.</span>
+  <p>Implements the user's revised rule (2026-05-26):
+  <ul>
+    <li><b>Must have a JWST F115W detection</b> (JWST star_id is the canonical identifier; no JWST ID &rarr; disqualified).</li>
+    <li><b>Must have HST F814W and Euclid VIS cross-matches</b> &mdash; same as v04.</li>
+    <li><b>JWST chip-gap check</b>: read a 5&times;5 pixel region at the position from JWST F115W SCI; require &ge; 80&nbsp;% of pixels finite &amp; nonzero. Removes the F115W_B10_0732664 type of edge artifact.</li>
+    <li>HST image-extent veto (data_properties FWHM/ellip) carried over.</li>
+    <li>Catalog galaxy veto carried over.</li>
+  </ul>
+  </p>
+  <p class="meta">Counts: 28,772 3-mission stars &rarr; 20,467 after JWST chip-gap veto (8,305 dropped) &rarr; 340 after image extent &rarr; 336 after catalog galaxy veto.
+  Every thumbnail has a simple <span style="color:red">red crosshair</span> at the catalog position.
+  Sorted by total proper motion (descending; highest |&mu;| first).</p>
+</div>
+
+<div class="ver" style="color:#999">
+  <s><a href="v04/index.html">v04</a></s> &nbsp; <span class="meta">built 2026-05-26 &mdash; superseded by v05.  264 candidates were missing_jwst only; v05 strict rule rejects them.</span>
+  <p>Implements the user's strict rule (2026-05-26):
+  <b>an orphan STAR candidate must have HST F814W AND Euclid VIS cross-matched
+  detections</b>.  The "orphan" character is exclusively a missing JWST F115W
+  cross-match.  Detections classified as <code>jwst_only</code> /
+  <code>hst_only</code> / <code>euclid_only</code> in v03 are
+  <b>disqualified</b> because they lack the required HST+Euclid pair.</p>
+  <p class="meta">Additional image-based extent veto: HST F814W second-moment
+  FWHM (data_properties) &gt; 0.21&Prime; or ellipticity &gt; 0.30 &rarr;
+  galaxy/artifact.  2,605 candidates met the strict rule &rarr; 2,523 after
+  position dedup at 0.05&Prime; &rarr; <b>264 after image-extent veto</b>
+  (89&nbsp;% were galaxies or artifacts missed by the catalog veto).
+  Catalog galaxy veto + saturated_stars_v3 vetos carried over from v03.</p>
 </div>
 
 </div>

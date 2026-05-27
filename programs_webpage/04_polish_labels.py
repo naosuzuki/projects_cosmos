@@ -142,6 +142,7 @@ def _fmt_mag(label, val):
 def repaint_labels(img_rgb, source_id, z, header, host_mag_label, host_mag,
                    sn_bands, sn_mags, show_sn_line=True,
                    best_snr=None, best_band=None,
+                   show_scale_bar=True,
                    font_pt=LABEL_FONT_PT, color=(255, 255, 255)):
     """New 3-line corner layout (no lower-right).
 
@@ -186,23 +187,27 @@ def repaint_labels(img_rgb, source_id, z, header, host_mag_label, host_mag,
         sn_line = " ".join(parts)
         _stamp(LABEL_PAD_PX, h - LABEL_PAD_PX, sn_line, "ls")
 
-    # 1" scale bar in lower-right corner.
-    # PNG pixel scale = 6 arcsec / 480 px = 12.5 mas/px → 1" = 80 px.
-    bar_px = int(round(1.0 / (6.0 / w)))   # works for any cutout/PNG ratio
-    bar_thickness = max(2, int(font_pt * 0.18))
-    bar_x_right = w - LABEL_PAD_PX
-    bar_y       = h - LABEL_PAD_PX
-    bar_x_left  = bar_x_right - bar_px
-    d.rectangle([(bar_x_left, bar_y - bar_thickness),
-                 (bar_x_right, bar_y)], fill=color)
-    # Label "1\"" just above the bar, right-aligned
-    try:
-        d.text((bar_x_right, bar_y - bar_thickness - 4),
-               '1"', font=font, fill=color, anchor="rs")
-    except TypeError:
-        d.text((bar_x_right - int(font_pt * 0.7),
-                bar_y - bar_thickness - font_pt - 4),
-               '1"', font=font, fill=color)
+    # 1" scale bar in lower-right corner.  Drawn only when show_scale_bar is
+    # True; we skip it on JWST/Euclid panels where it overlaps the SN-mag
+    # line in the lower-left area when the bar's rendered label is wide.
+    # HST is the only panel where we draw the bar (one per source is enough).
+    if show_scale_bar:
+        # PNG pixel scale = 6 arcsec / 480 px = 12.5 mas/px → 1" = 80 px.
+        bar_px = int(round(1.0 / (6.0 / w)))   # works for any cutout/PNG ratio
+        bar_thickness = max(2, int(font_pt * 0.18))
+        bar_x_right = w - LABEL_PAD_PX
+        bar_y       = h - LABEL_PAD_PX
+        bar_x_left  = bar_x_right - bar_px
+        d.rectangle([(bar_x_left, bar_y - bar_thickness),
+                     (bar_x_right, bar_y)], fill=color)
+        # Label "1\"" just above the bar, right-aligned
+        try:
+            d.text((bar_x_right, bar_y - bar_thickness - 4),
+                   '1"', font=font, fill=color, anchor="rs")
+        except TypeError:
+            d.text((bar_x_right - int(font_pt * 0.7),
+                    bar_y - bar_thickness - font_pt - 4),
+                   '1"', font=font, fill=color)
     return np.asarray(pil)
 
 
@@ -366,12 +371,17 @@ def process_source(cid, row, list_name, seq, out_dir):
         sn_band_list = spec["bands"]
         sn_mag_list  = [sn_mags.get(b, -1) for b in sn_band_list]
 
-        # SN=X.Xσ label only on detection (JWST) panels
+        # SN=X.Xσ label only on detection (JWST) panels.
+        # 1" scale bar only on the HST panel — JWST/Euclid panels carry
+        # the SN-mag line in the lower-left and the bar in the lower-right
+        # collides with the rendered text.  One bar per source is enough
+        # since all 5 panels share the same 6"×6" footprint.
         out = repaint_labels(out, cid, z, header, bluest, host_m,
                              sn_band_list, sn_mag_list,
                              show_sn_line=is_detection,
                              best_snr=best_snr if is_detection else None,
-                             best_band=best_band if is_detection else None)
+                             best_band=best_band if is_detection else None,
+                             show_scale_bar=(name == "hst"))
 
         out_path = out_dir / f"polished_{cid}_{name}.png"
         Image.fromarray(out).save(str(out_path))

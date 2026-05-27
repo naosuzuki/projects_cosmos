@@ -45,7 +45,12 @@ OUT_PARQ  = CSV_DIR / "sn_candidates_v03_all_scored.parquet"
 CUT_PIX     = 64
 BATCH_CNN   = 1024
 TOP_N_WEB   = 500
-WATCH_INTERVAL = 30   # seconds between webpage refreshes
+WATCH_INTERVAL = 15   # seconds between webpage refreshes
+
+# Magnitude floor — reject anything brighter than this in ANY band (saturation
+# guard). 21.0 chosen by user 2026-05-27 to avoid saturated stars while keeping
+# faint-SN sensitivity.
+MAG_FLOOR = 21.0
 
 HST_BANDS  = [("F814W","F814W")]
 JWST_BANDS = [("F115W","f115w"),("F150W","f150w"),("F277W","f277w"),("F444W","f444w")]
@@ -68,14 +73,28 @@ def log(msg, prefix="MAIN"):
 
 # -------- shared helpers (used in workers) --------
 def cutout_and_aper(sci_data, hdr, wcs, ra, dec, fwhm_as, kind, n=CUT_PIX):
+    """v03: returns (cutout, mag, snr, sharp, rnd1, rnd2, sep_sn_as, nan_frac).
+
+    sharp/rnd1/rnd2/sep_sn_as = DAO morphology of the nearest peak to the
+    source position (NaN if no peak in 3" search radius). Allow downstream
+    G2-G4 gating without re-opening the FITS.
+
+    nan_frac = fraction of NaN OR zero pixels in the central 20x20 region
+    of the cutout. >0.25 is the "edge/incomplete coverage" veto.
+    """
     import numpy as np, math
+    from astropy.stats import sigma_clipped_stats
+    from photutils.detection import DAOStarFinder
+    NAN_RESULT = (np.full((n, n), np.nan, dtype=np.float32),
+                  -1.0, 0.0, float("nan"), float("nan"), float("nan"),
+                  float("nan"), 1.0)
     try:
         sx, sy = wcs.all_world2pix(ra, dec, 0)
     except Exception:
-        return np.full((n, n), np.nan, dtype=np.float32), -1.0, 0.0
+        return NAN_RESULT
     sx = float(sx); sy = float(sy)
     if not (np.isfinite(sx) and np.isfinite(sy)):
-        return np.full((n, n), np.nan, dtype=np.float32), -1.0, 0.0
+        return NAN_RESULT
     ps = float(np.sqrt(np.abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600.0
     half = n // 2
     cx = int(round(sx)); cy = int(round(sy))
@@ -91,7 +110,12 @@ def cutout_and_aper(sci_data, hdr, wcs, ra, dec, fwhm_as, kind, n=CUT_PIX):
         if src_x1 > src_x0 and src_y1 > src_y0:
             cutout[ys0:ys1, xs0:xs1] = sci_data[src_y0:src_y1, src_x0:src_x1].astype(np.float32)
     if not np.any(np.isfinite(cutout)):
-        return cutout, -1.0, 0.0
+        return NAN_RESULT
+    # NaN/zero fraction in central 20x20
+    cyc, cxc = cutout.shape[0]//2, cutout.shape[1]//2
+    cen = cutout[max(0,cyc-10):cyc+10, max(0,cxc-10):cxc+10]
+    nan_frac = float(((~np.isfinite(cen)) | (cen == 0)).sum()) / max(1, cen.size)
+
     sub = np.where(np.isfinite(cutout), cutout, 0.0).astype(np.float64)
     cy_p = (sy - (cy - half)); cx_p = (sx - (cx - half))
     aper_r = fwhm_as / ps; ring_in = 2.0 * fwhm_as / ps; ring_out = 3.5 * fwhm_as / ps
@@ -99,13 +123,14 @@ def cutout_and_aper(sci_data, hdr, wcs, ra, dec, fwhm_as, kind, n=CUT_PIX):
     rr = np.sqrt((xx - cx_p)**2 + (yy - cy_p)**2)
     in_aper = rr <= aper_r; in_ring = (rr >= ring_in) & (rr <= ring_out)
     if not in_aper.any() or not in_ring.any():
-        return cutout, -1.0, 0.0
+        return cutout, -1.0, 0.0, float("nan"), float("nan"), float("nan"), float("nan"), nan_frac
     bg = float(np.nanmedian(sub[in_ring]))
     sub2 = sub - bg
     n_aper = int(in_aper.sum())
     flux = float(np.nansum(sub2[in_aper]))
     sig = float(np.nanstd(sub[in_ring])) * math.sqrt(n_aper)
     snr = flux / (sig + 1e-30)
+    # AB magnitude
     bunit = (hdr.get("BUNIT") or "").strip()
     if kind == "jwst" or "MJy/sr" in bunit:
         pix_sr = hdr.get("PIXAR_SR") or ((ps / 206265.0) ** 2)
@@ -117,7 +142,29 @@ def cutout_and_aper(sci_data, hdr, wcs, ra, dec, fwhm_as, kind, n=CUT_PIX):
     else:
         zp = hdr.get("ZP") or hdr.get("MAGZP") or hdr.get("PHOTZP") or 23.9
         mag = (float(zp) - 2.5 * math.log10(flux)) if flux > 0 else -1.0
-    return cutout, float(mag) if mag != -1.0 else -1.0, float(snr)
+    mag = float(mag) if (mag is not None and mag != -1.0) else -1.0
+
+    # DAO morphology — fast skip if snr_aper < 3 (no point source likely)
+    sharp = float("nan"); rnd1 = float("nan"); rnd2 = float("nan"); sep_sn = float("nan")
+    if snr >= 3.0:
+        try:
+            fwhm_px = max(1.5, fwhm_as / ps)
+            _, _, bg_std = sigma_clipped_stats(sub2, sigma=3.0, maxiters=2)
+            res = DAOStarFinder(fwhm=fwhm_px, threshold=3.0 * max(bg_std, 1e-6))(sub2)
+            if res is not None and len(res) > 0:
+                # find nearest peak to (cx_p, cy_p)
+                dxs = np.asarray(res["xcentroid"]) - cx_p
+                dys = np.asarray(res["ycentroid"]) - cy_p
+                dist_px = np.sqrt(dxs**2 + dys**2)
+                k = int(np.argmin(dist_px))
+                sep_sn = float(dist_px[k] * ps)  # arcsec
+                if sep_sn <= max(0.10, 1.5 * fwhm_as):
+                    sharp = float(res["sharpness"][k])
+                    rnd1  = float(res["roundness1"][k])
+                    rnd2  = float(res["roundness2"][k])
+        except Exception:
+            pass
+    return cutout, mag, float(snr), sharp, rnd1, rnd2, sep_sn, nan_frac
 
 
 def atomic_write_parquet(table, path):
@@ -131,6 +178,11 @@ def survey_worker(args):
     """Run inference for ONE survey, checkpointing after each tile."""
     import warnings; warnings.filterwarnings("ignore")
     import sys, os, time
+    # Allow numpy/scipy/photutils to use multiple BLAS threads PER worker.
+    # We have 4 worker processes on M-series (8 perf cores); 2 threads each
+    # gives 8 threads total without oversubscribing.
+    for v in ("OMP_NUM_THREADS","OPENBLAS_NUM_THREADS","MKL_NUM_THREADS","VECLIB_MAXIMUM_THREADS","NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(v, "2")
     sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
     import recut_3_hst as R_local
     from astropy.io import fits
@@ -167,6 +219,11 @@ def survey_worker(args):
     for b in bands:
         acc[f"mag_{b}"] = []
         acc[f"snr_{b}"] = []
+        acc[f"sharp_{b}"] = []
+        acc[f"rnd1_{b}"]  = []
+        acc[f"rnd2_{b}"]  = []
+        acc[f"sep_{b}"]   = []
+        acc[f"nanfrac_{b}"] = []
 
     t0 = time.time()
     sorted_tiles = sorted(by_tile.items())
@@ -198,6 +255,11 @@ def survey_worker(args):
                 acc["idx"].append(gidx); acc["P"].append(float("nan"))
                 for b in bands:
                     acc[f"mag_{b}"].append(-1.0); acc[f"snr_{b}"].append(0.0)
+                    acc[f"sharp_{b}"].append(float("nan"))
+                    acc[f"rnd1_{b}"].append(float("nan"))
+                    acc[f"rnd2_{b}"].append(float("nan"))
+                    acc[f"sep_{b}"].append(float("nan"))
+                    acc[f"nanfrac_{b}"].append(1.0)
             continue
         # Y-sort
         try:
@@ -212,16 +274,33 @@ def survey_worker(args):
         for batch_start in range(0, len(ordered), BATCH_CNN):
             batch = ordered[batch_start:batch_start + BATCH_CNN]
             cutouts = np.full((len(batch), in_ch, CUT_PIX, CUT_PIX), np.nan, dtype=np.float32)
-            mag_b = {b: [] for b in bands}
-            snr_b = {b: [] for b in bands}
+            mag_b   = {b: [] for b in bands}
+            snr_b   = {b: [] for b in bands}
+            sharp_b = {b: [] for b in bands}
+            rnd1_b  = {b: [] for b in bands}
+            rnd2_b  = {b: [] for b in bands}
+            sep_b   = {b: [] for b in bands}
+            nf_b    = {b: [] for b in bands}
             for k, (gidx, ra_v, dec_v) in enumerate(batch):
                 for ci, (blabel, _) in enumerate(band_specs):
                     if hdus[blabel] is None:
-                        mag_b[blabel].append(-1.0); snr_b[blabel].append(0.0); continue
-                    c, mag, snr = cutout_and_aper(hdus[blabel].data, hdrs[blabel], wcss[blabel],
-                                                  ra_v, dec_v, FWHM_AS[blabel], kind=kind)
+                        mag_b[blabel].append(-1.0); snr_b[blabel].append(0.0)
+                        sharp_b[blabel].append(float("nan"))
+                        rnd1_b[blabel].append(float("nan"))
+                        rnd2_b[blabel].append(float("nan"))
+                        sep_b[blabel].append(float("nan"))
+                        nf_b[blabel].append(1.0)
+                        continue
+                    c, mag, snr, sharp, rnd1, rnd2, sep_sn, nan_frac = cutout_and_aper(
+                        hdus[blabel].data, hdrs[blabel], wcss[blabel],
+                        ra_v, dec_v, FWHM_AS[blabel], kind=kind)
                     cutouts[k, ci] = c
                     mag_b[blabel].append(mag); snr_b[blabel].append(snr)
+                    sharp_b[blabel].append(sharp)
+                    rnd1_b[blabel].append(rnd1)
+                    rnd2_b[blabel].append(rnd2)
+                    sep_b[blabel].append(sep_sn)
+                    nf_b[blabel].append(nan_frac)
             with torch.no_grad():
                 xb = torch.tensor(cutouts, dtype=torch.float32, device=device)
                 p = torch.sigmoid(model(xb)).cpu().numpy()
@@ -231,6 +310,11 @@ def survey_worker(args):
                 for b in bands:
                     acc[f"mag_{b}"].append(mag_b[b][k])
                     acc[f"snr_{b}"].append(snr_b[b][k])
+                    acc[f"sharp_{b}"].append(sharp_b[b][k])
+                    acc[f"rnd1_{b}"].append(rnd1_b[b][k])
+                    acc[f"rnd2_{b}"].append(rnd2_b[b][k])
+                    acc[f"sep_{b}"].append(sep_b[b][k])
+                    acc[f"nanfrac_{b}"].append(nf_b[b][k])
         # close handles
         for blabel in list(hdus):
             try:
@@ -282,10 +366,15 @@ def watcher(N_total, pid_arr, psrc_arr, ra_arr, dec_arr, th_arr, tj_arr, te_arr,
 
 def update_outputs(N, pid, psrc, ra, dec, th, tj, te, in_h, in_j, in_e, thresholds, final=False):
     """Read all partial parquets, apply rule, write CSV + HTML."""
-    # Gather per-survey P + mags/snrs into N-shaped arrays
+    # Gather per-survey P + mags/snrs/morphology into N-shaped arrays
     P = {s: np.full(N, np.nan, dtype=np.float32) for s in ("hst","jwst","vis","nisp")}
-    MAG = {b: np.full(N, -1.0, dtype=np.float32) for b in CSV_BANDS}
-    SNR = {b: np.full(N, 0.0, dtype=np.float32) for b in CSV_BANDS}
+    MAG  = {b: np.full(N, -1.0, dtype=np.float32) for b in CSV_BANDS}
+    SNR  = {b: np.full(N,  0.0, dtype=np.float32) for b in CSV_BANDS}
+    SHARP = {b: np.full(N, np.nan, dtype=np.float32) for b in CSV_BANDS}
+    RND1  = {b: np.full(N, np.nan, dtype=np.float32) for b in CSV_BANDS}
+    RND2  = {b: np.full(N, np.nan, dtype=np.float32) for b in CSV_BANDS}
+    SEP   = {b: np.full(N, np.nan, dtype=np.float32) for b in CSV_BANDS}
+    NFR   = {b: np.full(N,  1.0, dtype=np.float32) for b in CSV_BANDS}
     surveys_done = {s: False for s in P}   # whether the partial parquet exists at all
     surveys_processed = {s: 0 for s in P}
     for survey in ("hst","jwst","vis","nisp"):
@@ -299,28 +388,38 @@ def update_outputs(N, pid, psrc, ra, dec, th, tj, te, in_h, in_j, in_e, threshol
         Ps   = t["P"].to_numpy(zero_copy_only=False)
         if len(idxs) == 0: continue
         valid = idxs >= 0
-        P[survey][idxs[valid].astype(np.int64)] = Ps[valid].astype(np.float32)
+        ii = idxs[valid].astype(np.int64)
+        P[survey][ii] = Ps[valid].astype(np.float32)
+        cols = set(t.column_names)
         for b in SURVEY_BANDS[survey]:
-            mcol = t[f"mag_{b}"].to_numpy(zero_copy_only=False)
-            scol = t[f"snr_{b}"].to_numpy(zero_copy_only=False)
-            MAG[b][idxs[valid].astype(np.int64)] = mcol[valid].astype(np.float32)
-            SNR[b][idxs[valid].astype(np.int64)] = scol[valid].astype(np.float32)
+            MAG[b][ii] = t[f"mag_{b}"].to_numpy(zero_copy_only=False)[valid].astype(np.float32)
+            SNR[b][ii] = t[f"snr_{b}"].to_numpy(zero_copy_only=False)[valid].astype(np.float32)
+            if f"sharp_{b}" in cols:
+                SHARP[b][ii] = t[f"sharp_{b}"].to_numpy(zero_copy_only=False)[valid].astype(np.float32)
+                RND1[b][ii]  = t[f"rnd1_{b}"].to_numpy(zero_copy_only=False)[valid].astype(np.float32)
+                RND2[b][ii]  = t[f"rnd2_{b}"].to_numpy(zero_copy_only=False)[valid].astype(np.float32)
+                SEP[b][ii]   = t[f"sep_{b}"].to_numpy(zero_copy_only=False)[valid].astype(np.float32)
+                NFR[b][ii]   = t[f"nanfrac_{b}"].to_numpy(zero_copy_only=False)[valid].astype(np.float32)
         surveys_done[survey] = True
         surveys_processed[survey] = int(valid.sum())
 
     if not any(surveys_done.values()):
         return
 
-    # Coverage-aware 1-of-N rule
+    # Coverage-aware detection rule.
+    # v03 update (user 2026-05-27): Euclid VIS and NISP are taken at the same
+    # epoch, so a real Euclid SN typically fires in BOTH (or ONE if depth
+    # differs). Group them: det_euclid = det_vis OR det_nisp. Per-telescope
+    # 1-of-3 rule across HST / JWST / Euclid.
     thr_hst  = thresholds.get("hst",  0.5)
     thr_jwst = thresholds.get("jwst", 0.5)
     thr_vis  = thresholds.get("vis",  0.5)
     thr_nisp = thresholds.get("nisp", 0.5)
-    # detection booleans (only meaningful where P is finite)
     det_hst  = np.where(in_h & np.isfinite(P["hst"]),  P["hst"]  >= thr_hst,  False)
     det_jwst = np.where(in_j & np.isfinite(P["jwst"]), P["jwst"] >= thr_jwst, False)
     det_vis  = np.where(in_e & np.isfinite(P["vis"]),  P["vis"]  >= thr_vis,  False)
     det_nisp = np.where(in_e & np.isfinite(P["nisp"]), P["nisp"] >= thr_nisp, False)
+    det_euclid = det_vis | det_nisp   # NEW: VIS OR NISP counts as one Euclid detection
     # coverage AND processed
     cov_hst  = in_h & np.isfinite(P["hst"])
     cov_jwst = in_j & np.isfinite(P["jwst"])
@@ -331,69 +430,159 @@ def update_outputs(N, pid, psrc, ra, dec, th, tj, te, in_h, in_j, in_e, threshol
     nondet_jwst = cov_jwst & ~det_jwst
     nondet_vis  = cov_vis  & ~det_vis
     nondet_nisp = cov_nisp & ~det_nisp
-    n_det = det_hst.astype(int) + det_jwst.astype(int) + det_vis.astype(int) + det_nisp.astype(int)
+    # 1-of-3 telescope rule (HST / JWST / Euclid). VIS and NISP collapse.
+    n_det = det_hst.astype(int) + det_jwst.astype(int) + det_euclid.astype(int)
     n_cov = cov_hst.astype(int) + cov_jwst.astype(int) + cov_vis.astype(int) + cov_nisp.astype(int)
-    # A source is "evaluated" (rule applicable) when every covered survey is also processed.
-    # Per source: needed surveys = (in_h, in_j, in_e, in_e). Done surveys = same boolean AND
-    # finite P. We just need all of in_h ⇒ finite(P_hst), etc.
+    # A source is "evaluated" (rule applicable) when every covered survey
+    # WITH A TRAINED MODEL is processed. VIS is intentionally skipped (no
+    # positives ever discovered there → no model trained), so we do NOT
+    # require it for the evaluated flag.
     evaluated = (
         (~in_h | np.isfinite(P["hst"])) &
         (~in_j | np.isfinite(P["jwst"])) &
-        (~in_e | np.isfinite(P["vis"])) &
         (~in_e | np.isfinite(P["nisp"]))
     )
     # v03 RULES:
-    #   1. Coverage: REQUIRE in_hst & in_jwst & in_euclid (full 4-survey coverage)
-    #   2. Detection asymmetry: exactly 1 of 4 surveys says "detected"
-    #   3. Magnitude floor: best_snr-band mag > 22 (skip bright sources;
-    #      bright SNe are rare and confused with stars/saturation)
-    #   4. snr floor: best_snr ≥ 5 in detection band (real photometric flux)
-    # We compute best_snr/best_mag below after `which` is assigned.
+    #   1. Coverage: REQUIRE full HST + JWST + Euclid coverage
+    #   2. Detection asymmetry: exactly 1 of 3 TELESCOPES says "detected"
+    #      (HST / JWST / Euclid, where Euclid = VIS OR NISP)
+    #   3. Magnitude floor: best_snr-band mag ≥ MAG_FLOOR
+    #   4. snr floor: best_snr ≥ 5 in detection band
     full_cov = in_h & in_j & in_e
     is_sn = (n_det == 1) & evaluated & full_cov
 
-    # composite confidence
-    P_arr = np.stack([np.nan_to_num(P[s], nan=0.0) for s in ("hst","jwst","vis","nisp")], axis=1)
-    det_arr = np.stack([det_hst, det_jwst, det_vis, det_nisp], axis=1)
-    det_survey_p = np.where(det_arr, P_arr, 0.0).max(axis=1)
-    nondet_max_p = np.where(~det_arr, P_arr, 0.0).max(axis=1)
+    # composite confidence — best detected P × (1 − best non-detected P), with
+    # VIS+NISP collapsed: best Euclid-detected P is max over VIS and NISP if
+    # either is detected; non-detection penalty is also computed at the
+    # telescope level.
+    P_hst_d  = np.where(det_hst,  np.nan_to_num(P["hst"],  nan=0.0), 0.0)
+    P_jwst_d = np.where(det_jwst, np.nan_to_num(P["jwst"], nan=0.0), 0.0)
+    P_vis_d  = np.where(det_vis,  np.nan_to_num(P["vis"],  nan=0.0), 0.0)
+    P_nisp_d = np.where(det_nisp, np.nan_to_num(P["nisp"], nan=0.0), 0.0)
+    P_eu_d   = np.maximum(P_vis_d, P_nisp_d)
+    det_survey_p = np.maximum.reduce([P_hst_d, P_jwst_d, P_eu_d])
+    # non-detection penalty: max P in the telescope(s) that did NOT fire
+    P_hst_nd  = np.where(~det_hst,  np.nan_to_num(P["hst"],  nan=0.0), 0.0)
+    P_jwst_nd = np.where(~det_jwst, np.nan_to_num(P["jwst"], nan=0.0), 0.0)
+    P_eu_nd   = np.maximum(
+        np.where(~det_euclid, np.nan_to_num(P["vis"],  nan=0.0), 0.0),
+        np.where(~det_euclid, np.nan_to_num(P["nisp"], nan=0.0), 0.0),
+    )
+    nondet_max_p = np.maximum.reduce([P_hst_nd, P_jwst_nd, P_eu_nd])
     comp_conf = det_survey_p * (1.0 - nondet_max_p)
 
-    survey_names = np.array(["HST","JWST","EUCLID-VIS","EUCLID-NISP"])
+    # Telescope label, preserving Euclid sub-label by which band(s) fired
     which = np.full(N, "", dtype=object)
-    for k, name in enumerate(survey_names):
-        col = det_arr[:, k] & is_sn
-        which[col] = name
+    which[det_hst  & is_sn] = "HST"
+    which[det_jwst & is_sn] = "JWST"
+    eu_both = det_vis  & det_nisp & is_sn
+    eu_visonly  = det_vis  & ~det_nisp & is_sn
+    eu_nisponly = det_nisp & ~det_vis  & is_sn
+    which[eu_both]      = "EUCLID-VIS+NISP"
+    which[eu_visonly]   = "EUCLID-VIS"
+    which[eu_nisponly]  = "EUCLID-NISP"
 
     # ---- CSV (apply v03 hard rules at emission) ----
     sn_idx = np.where(is_sn)[0]
     sn_idx = sn_idx[np.argsort(-comp_conf[sn_idx])]
-    band_to_survey = {"F814W":"HST","F115W":"JWST","F150W":"JWST","F277W":"JWST","F444W":"JWST",
-                      "VIS":"EUCLID-VIS","Y":"EUCLID-NISP","J":"EUCLID-NISP","H":"EUCLID-NISP"}
+    # Map the source's telescope label to the bands we should scan for best
+    # SNR / mag. For Euclid the band set is union of VIS + NISP — covers all
+    # three label variants.
+    band_to_survey = {
+        "F814W":"HST",
+        "F115W":"JWST","F150W":"JWST","F277W":"JWST","F444W":"JWST",
+        "VIS":"EUCLID-VIS","Y":"EUCLID-NISP","J":"EUCLID-NISP","H":"EUCLID-NISP",
+    }
+    # Which bands belong to each telescope label for best-band picking
+    bands_per_label = {
+        "HST":              ["F814W"],
+        "JWST":             ["F115W","F150W","F277W","F444W"],
+        "EUCLID-VIS":       ["VIS"],
+        "EUCLID-NISP":      ["Y","J","H"],
+        "EUCLID-VIS+NISP":  ["VIS","Y","J","H"],
+    }
 
-    # dN/dm prior: p(mag) ∝ 10^(0.4·mag) in [22, 27] roughly. Normalised so
-    # P_prior(22) = 0.01 and P_prior(27) = 1.0.
+    # dN/dm prior: p(mag) ∝ 10^(0.4·mag) over the search range [MAG_FLOOR, 27].
+    # Normalised so P_prior(MAG_FLOOR) = 10^(0.4·(MAG_FLOOR-27)) and P_prior(27) = 1.0.
     def dndm_prior(mag):
-        # piecewise linear in log scale
         if mag is None or not np.isfinite(mag) or mag <= 0: return 0.0
-        if mag < 22: return 0.0      # bright sources have ~0 SN prior
-        if mag > 27: return 1.0       # capped; depth-limited regime
-        return 10**(0.4 * (mag - 27))  # 0.01 at mag 22 → 1.0 at mag 27
+        if mag < MAG_FLOOR: return 0.0   # bright sources have ~0 SN prior
+        if mag > 27: return 1.0           # capped; depth-limited regime
+        return 10**(0.4 * (mag - 27))
+
+    # FWHM per band for G1 (sep_sn) gate
+    G1_TOL = {b: max(0.10, 1.5 * FWHM_AS[b]) for b in CSV_BANDS}
+    # G2-G4 thresholds per programs_webpage/CLAUDE.md §2.1
+    SHARP_LO, SHARP_HI = 0.40, 0.85
+    RND_LIM = 0.50
+    NF_LIM  = 0.25   # NaN/zero fraction veto on central 20x20
+
+    def band_passes_morph(b, i):
+        """G1 sep + G2 sharp + G3 rnd1 + G4 rnd2 + NaN-frac for source i band b."""
+        sp = float(SHARP[b][i]); r1 = float(RND1[b][i]); r2 = float(RND2[b][i])
+        sg = float(SEP[b][i]);   nf = float(NFR[b][i])
+        if nf > NF_LIM: return False
+        if not np.isfinite(sg) or sg > G1_TOL[b]: return False
+        if not np.isfinite(sp) or sp < SHARP_LO or sp > SHARP_HI: return False
+        if not np.isfinite(r1) or abs(r1) > RND_LIM: return False
+        if not np.isfinite(r2) or abs(r2) > RND_LIM: return False
+        return True
 
     rows = []
-    n_filt_snr = 0; n_filt_mag = 0
+    n_filt_snr = 0; n_filt_mag = 0; n_filt_morph = 0
+    n_filt_cross = 0; n_filt_nan = 0; n_filt_sat = 0
     for cand_no, i in enumerate(sn_idx, start=1):
         det_name = which[i]
-        bands_for_det = [b for b, s in band_to_survey.items() if s == det_name]
+        bands_for_det = bands_per_label.get(det_name, [])
+        # Saturation guard: REJECT if ANY band (across all surveys) shows
+        # mag < MAG_FLOOR with finite detection (snr ≥ 3). A real SN at
+        # mag<MAG_FLOOR in ANY band means we're sitting on a bright star.
+        saturated = False
+        for b in CSV_BANDS:
+            mv = float(MAG[b][i]); sv = float(SNR[b][i])
+            if np.isfinite(mv) and 0 < mv < MAG_FLOOR and np.isfinite(sv) and sv >= 3.0:
+                saturated = True; break
+        if saturated:
+            n_filt_sat += 1; continue
+        # Pick best band by SNR among bands passing morphology G1-G4 + NaN veto
         best_band = ""; best_snr = 0.0; best_mag = -1.0
+        morph_ok_any = False
         for b in bands_for_det:
             sv = float(SNR[b][i])
-            if np.isfinite(sv) and sv > best_snr:
+            if not np.isfinite(sv) or sv <= 0: continue
+            if not band_passes_morph(b, i): continue
+            morph_ok_any = True
+            if sv > best_snr:
                 best_snr = sv; best_band = b; best_mag = float(MAG[b][i])
+        if not morph_ok_any:
+            n_filt_morph += 1; continue
+        # Cross-band consistency for multi-band telescopes (JWST, Euclid):
+        # the brightest band's SNR must not exceed 10× the second-brightest
+        # morph-passing band (rejects single-band flares — CR strikes / hot
+        # pixels masquerading as point sources). Single-band detection labels
+        # (HST, EUCLID-VIS) are exempt — no second band to compare against.
+        if det_name in ("JWST", "EUCLID-NISP", "EUCLID-VIS+NISP"):
+            morph_snrs = sorted(
+                [float(SNR[b][i]) for b in bands_for_det
+                 if band_passes_morph(b, i) and np.isfinite(SNR[b][i]) and SNR[b][i] > 0],
+                reverse=True,
+            )
+            if len(morph_snrs) >= 2:
+                if morph_snrs[0] > 10.0 * morph_snrs[1]:
+                    n_filt_cross += 1; continue
+            elif len(morph_snrs) == 1:
+                # single-band-only detection in a multi-band telescope is
+                # suspicious — require strong PSF source (snr ≥ 8).
+                if morph_snrs[0] < 8.0:
+                    n_filt_cross += 1; continue
+        # NaN-frac veto already applied via band_passes_morph; but also
+        # require the *detection* band's central 20x20 to be clean.
+        if not np.isfinite(NFR[best_band][i]) or NFR[best_band][i] > NF_LIM:
+            n_filt_nan += 1; continue
         # v03 hard rules
         if best_snr < 5.0:
             n_filt_snr += 1; continue
-        if best_mag <= 0 or best_mag < 22.0:
+        if best_mag <= 0 or best_mag < MAG_FLOOR:
             n_filt_mag += 1; continue
         # apply dN/dm prior to composite confidence
         comp_conf[i] = float(comp_conf[i]) * dndm_prior(best_mag)
@@ -423,6 +612,11 @@ def update_outputs(N, pid, psrc, ra, dec, th, tj, te, in_h, in_j, in_e, threshol
         r["composite_confidence"] = f"{float(comp_conf[i]):.4f}"
         rows.append(r)
 
+    # Re-sort rows by prior-adjusted composite confidence (descending).
+    rows.sort(key=lambda r: -float(r["composite_confidence"]))
+    # Re-number cand IDs so rank-1 = top candidate.
+    for new_rank, r in enumerate(rows, start=1):
+        r["id"] = f"cand_{new_rank:05d}"
     if rows:
         cols = list(rows[0].keys())
         tmp = OUT_CSV.with_suffix(".csv.tmp")
@@ -444,7 +638,7 @@ def update_outputs(N, pid, psrc, ra, dec, th, tj, te, in_h, in_j, in_e, threshol
             "h1{color:#333} .det{background:#e0f5e0}",
             ".prog{background:#fff5b0;padding:8px 12px;border:1px solid #d4a017;margin:10px 0}",
             "</style></head><body><div class='wrap'>",
-            "<h1>SN search v01 — 1-of-N detection (HST / JWST / Euclid-VIS / Euclid-NISP)</h1>",
+            "<h1>SN search v03 &mdash; 1-of-3 telescope detection (HST / JWST / Euclid). VIS+NISP collapsed; either or both bands counts as 1 Euclid detection.</h1>",
             f"<p>Last update: {time.strftime('%Y-%m-%d %H:%M:%S')}{' (FINAL)' if final else ' (running — refreshes every 30s)'}</p>",
             "<div class='prog'>",
             f"<b>Progress:</b><br>",
@@ -453,7 +647,14 @@ def update_outputs(N, pid, psrc, ra, dec, th, tj, te, in_h, in_j, in_e, threshol
             f"Euclid VIS processed: {surveys_processed['vis']:,}{' ✔' if surveys_done['vis'] else ''}<br>",
             f"Euclid NISP processed: {surveys_processed['nisp']:,}{' ✔' if surveys_done['nisp'] else ''}<br>",
             f"<br><b>Sources fully evaluated</b> (all covered surveys processed): {int(evaluated.sum()):,}<br>",
-            f"<b>SN candidates so far (1-of-N rule):</b> <span style='color:#d80'>{int(is_sn.sum()):,}</span>",
+            f"<b>1-of-N raw detections:</b> {int(is_sn.sum()):,}<br>",
+            f"&nbsp;&nbsp;&minus; saturation guard (any-band mag&lt;{MAG_FLOOR:.0f}): {n_filt_sat:,}<br>",
+            f"&nbsp;&nbsp;&minus; morphology G1-G4 rejects: {n_filt_morph:,}<br>",
+            f"&nbsp;&nbsp;&minus; cross-band consistency rejects: {n_filt_cross:,}<br>",
+            f"&nbsp;&nbsp;&minus; NaN/edge veto rejects: {n_filt_nan:,}<br>",
+            f"&nbsp;&nbsp;&minus; SNR&lt;5 rejects: {n_filt_snr:,}<br>",
+            f"&nbsp;&nbsp;&minus; mag&lt;{MAG_FLOOR:.0f} rejects: {n_filt_mag:,}<br>",
+            f"<b>SN candidates after v03 rules:</b> <span style='color:#d80'>{len(rows):,}</span>",
             "</div>",
             f"<p>Per-survey detections (overall, may include incomplete-coverage rows): "
             f"HST={int(det_hst.sum()):,}, JWST={int(det_jwst.sum()):,}, "
@@ -465,24 +666,17 @@ def update_outputs(N, pid, psrc, ra, dec, th, tj, te, in_h, in_j, in_e, threshol
             "<table><thead><tr><th>rank</th><th>id</th><th>tel</th><th>ra</th><th>dec</th>"
             "<th>comp_conf</th><th>best band</th><th>best snr</th>"
             "<th>P_hst</th><th>P_jwst</th><th>P_vis</th><th>P_nisp</th></tr></thead><tbody>"]
-    for rank, i in enumerate(sn_idx[:TOP_N_WEB], start=1):
-        p_hst  = P['hst'][i]  if np.isfinite(P['hst'][i])  else 0.0
-        p_jwst = P['jwst'][i] if np.isfinite(P['jwst'][i]) else 0.0
-        p_vis  = P['vis'][i]  if np.isfinite(P['vis'][i])  else 0.0
-        p_nisp = P['nisp'][i] if np.isfinite(P['nisp'][i]) else 0.0
-        cls_h = "det" if det_hst[i]  else ""
-        cls_j = "det" if det_jwst[i] else ""
-        cls_v = "det" if det_vis[i]  else ""
-        cls_n = "det" if det_nisp[i] else ""
-        page.append(f"<tr><td>{rank}</td><td>{pid[i]}</td><td class='lab'>{which[i]}</td>"
-                    f"<td>{ra[i]:.6f}</td><td>{dec[i]:.6f}</td>"
-                    f"<td>{comp_conf[i]:.3f}</td>"
-                    f"<td>{rows[rank-1]['best_band']}</td>"
-                    f"<td>{rows[rank-1]['best_snr']}</td>"
-                    f"<td class='{cls_h}'>{p_hst:.3f}</td>"
-                    f"<td class='{cls_j}'>{p_jwst:.3f}</td>"
-                    f"<td class='{cls_v}'>{p_vis:.3f}</td>"
-                    f"<td class='{cls_n}'>{p_nisp:.3f}</td></tr>")
+    for rank, r in enumerate(rows[:TOP_N_WEB], start=1):
+        page.append(
+            f"<tr><td>{rank}</td><td>{r['primary_id']}</td>"
+            f"<td class='lab'>{r['telescope']}</td>"
+            f"<td>{r['sn_ra']}</td><td>{r['sn_dec']}</td>"
+            f"<td>{r['composite_confidence']}</td>"
+            f"<td>{r['best_band']}</td><td>{r['best_snr']}</td>"
+            f"<td>{r['cnn_conf_hst']}</td>"
+            f"<td>{r['cnn_conf_jwst']}</td>"
+            f"<td>{r['cnn_conf_vis']}</td>"
+            f"<td>{r['cnn_conf_nisp']}</td></tr>")
     page.append("</tbody></table></div></body></html>")
     (HTML_DIR / "index.html").write_text("\n".join(page))
 
