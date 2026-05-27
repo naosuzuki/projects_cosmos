@@ -1,0 +1,20 @@
+# SN candidate source catalog v03 — build summary
+# Built: 2026-05-27 13:37:59  (4.0 sec total)
+# Source: /Users/suzuki/github/projects_cosmos/csvfiles_star/master_or_catalog_v03.parquet
+# Output: /Users/suzuki/github/projects_cosmos/csvfiles_sn/sn_candidates_v03.parquet
+
+## Exclusion rules
+EXCLUDE if  is_likely_star == True   (master v03 aggregation)
+EXCLUDE if  is_agn_qso     == True
+
+## Row counts
+Total in master v03:             1,215,146
+  Excluded:                        104,008  (8.56%)
+  Kept (SN candidates):          1,111,138  (91.44%)
+
+## Per-rule exclusion counts (with overlap)
+is_likely_star:                     98,392
+is_agn_qso:                          5,616
+  ∩ (both True):                         0
+
+## File size: 374.5 MB (zstd parquet)

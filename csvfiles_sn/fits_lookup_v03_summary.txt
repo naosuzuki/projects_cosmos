@@ -1,0 +1,27 @@
+# SN candidate FITS lookup v01 — summary
+# Built: 2026-05-27 13:39:01  (36.2 sec total)
+# Source: /Users/suzuki/github/projects_cosmos/csvfiles_sn/sn_candidates_v03.parquet
+# Output: /Users/suzuki/github/projects_cosmos/csvfiles_sn/fits_lookup_v03.parquet
+
+## Tile footprint counts (per survey)
+  HST    fields:             81
+  JWST   tiles  (F115W):     20
+  Euclid tiles  (VIS):       60
+
+## Per-survey coverage (any tile assigned)
+  in_hst    True:     988,837  (88.99%)
+  in_jwst   True:     495,532  (44.60%)
+  in_euclid True:   1,111,138  (100.00%)
+
+## Cross-coverage breakdown
+  in_hst ∩ in_jwst ∩ in_euclid:         495,532
+  in_hst ∩ in_jwst (no Euclid):               0
+  in_hst ∩ in_euclid (no JWST):         493,305
+  in_jwst ∩ in_euclid (no HST):               0
+  HST only:                                   0
+  JWST only:                                  0
+  Euclid only:                          122,301
+  None covered (probably outside any tile or no RA/Dec):          0
+
+## File size
+  24.7 MB (zstd parquet)
