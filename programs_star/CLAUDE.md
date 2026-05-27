@@ -205,16 +205,40 @@ sources (bleed trails, distorted PSFs).  Consequence:
     cross-mission PM analysis (HST_Euclid_NISP, HST_Euclid_VIS,
     HST_JWST), so `pmtot_*` is always NaN even when visible proper
     motion is obvious to the eye.
-  - Found in cand_39: NISP-detected, NISP PHZ classification=2 (STAR),
-    HST imagery clearly shows a saturated star, but no `hst_id` →
-    no PM measurement.
 
-**Fix proposal (v02)** at the master level (does not require rerunning
-programs_hst):
-  - Add column `hst_saturated_likely` set True when:
-    `(detected_in_nisp OR detected_in_vis) AND NOT detected_in_hst
-     AND cat_mag_VIS_vis < 18`  (bright Euclid source missing from HST).
-  - These sources should be flagged in `is_likely_star`.
+**Cases found in SN-search v01 visual inspection (2026-05-27):**
+  - **cand_39**: NISP-detected, NISP PHZ classification=2 (STAR), HST
+    imagery clearly shows a saturated star, but no `hst_id` → no PM.
+  - **cand_98**: HST imagery and Euclid imagery both show the star,
+    user sees "very big proper motion" between HST and Euclid. Master
+    shows `cat_point_like_prob_vis=0.989` (STAR), `is_point_source=True`,
+    but `cat_mag_F814W_hst=NaN`, `cat_ra_hst=NaN` (HST catalog missing).
+    PM pairs all NaN — no cross-mission measurement possible.
+
+**Fix proposal (v02 master, no programs_hst rerun needed)**:
+
+Add column `hst_saturated_likely` = True when ALL of:
+  - `cat_point_like_prob_vis > 0.9` OR `cat_point_like_prob_nisp > 0.9`
+    OR `cat_phz_classification_vis == 2` OR `cat_phz_classification_nisp == 2`
+  - `cat_ra_hst is NaN` (i.e. HST catalog missed this source)
+  - Source position is INSIDE an HST tile footprint (covered but not
+    catalog-detected → strong saturation evidence)
+
+These sources MUST be flagged in `is_likely_star`.
+
+Additional v02 column proposal `large_pm_likely` = True when:
+  - `is_likely_star == True` (any of the above star flags), AND
+  - one of:
+      (a) `any pmtot_<pair> > 100 mas/yr` regardless of pm_flag (Gaia DR3
+          high-PM stars come up here)
+      (b) raw position delta between any two missions' cat_ra/cat_dec
+          implies > 30 mas/yr (catches B5 cases where the PM measurement
+          script understates motion)
+      (c) `hst_saturated_likely == True` (likely a bright nearby star
+          with large PM that saturated HST and Gaia)
+
+This `large_pm_likely` flag goes downstream as a strong star-candidate
+indicator even when explicit PM measurement is broken (B3, B5).
 
 **Fix proposal (long-term)** in programs_hst:
   - Rerun the per-tile catalog with a relaxed saturation mask (or a
