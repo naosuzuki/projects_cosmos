@@ -1,0 +1,512 @@
+#!/usr/bin/env python
+"""
+59_master_or_catalog.py — Step 8: build the 4-mission OR (union) master
+star catalog with PM info from all 5 v02 pair catalogs.
+
+Per row = one unique physical source detected by ≥1 mission.
+
+Primary ID precedence:
+  1.  jwst_id            (just the JWST integer ID)
+  2.  HSTID_<hst_id>
+  3.  EuclidID_<euclid_id>     (uses VIS id; NISP shares the MER ID)
+
+Source-unification logic (same as v01 Step 5 OR cross-match):
+  - Union-find by Gaia source_id (gold-standard tie across missions).
+  - Positional union-find for catalog-only sources between every mission
+    pair, with per-pair tolerances.
+
+Output columns (in order):
+  primary_id, primary_source            ('jwst', 'hst', 'euclid_vis', 'euclid_nisp')
+  hst_id, jwst_id, euclid_vis_id, euclid_nisp_id
+  detected_in_<m>            booleans (4)
+  source_type_<m>            ('catalog' / 'catalog+gaia' / 'gaia_only_bright' / NaN)
+  is_point_source, is_agn_qso
+  canonical gaia_* columns   (24)
+  per-mission cat_* / DAO columns suffixed by mission tag
+  PM columns from 5 pair catalogs:
+     pmra_<pair>, pmdec_<pair>, pmtot_<pair>,
+     pmra_err_<pair>, pmdec_err_<pair>, pmtot_err_<pair>,
+     pm_flag_<pair>
+   where <pair> ∈ {HST_Euclid_VIS, HST_Euclid_NISP, HST_JWST,
+                    JWST_Euclid_VIS, JWST_Euclid_NISP}
+
+Output file:
+  csvfiles_star/master_or_catalog_v01.parquet
+  csvfiles_star/master_or_catalog_v01.csv   (skipped if too large)
+"""
+from __future__ import annotations
+import time
+import warnings
+from itertools import combinations
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from astropy.coordinates import SkyCoord, search_around_sky
+from astropy import units as u
+
+warnings.filterwarnings('ignore')
+ROOT = Path('/Users/suzuki/github/projects_cosmos')
+OUT  = ROOT / 'csvfiles_star'
+
+MISSIONS = ['HST', 'JWST', 'Euclid_VIS', 'Euclid_NISP']
+TAG = {'HST': 'hst', 'JWST': 'jwst', 'Euclid_VIS': 'vis', 'Euclid_NISP': 'nisp'}
+ID_COL = {'HST': 'hst_id', 'JWST': 'jwst_id',
+           'Euclid_VIS': 'euclid_id', 'Euclid_NISP': 'euclid_id'}
+
+PAIR_RADIUS_AS = {
+    frozenset(['HST', 'JWST']):              0.50,
+    frozenset(['HST', 'Euclid_VIS']):        0.50,
+    frozenset(['HST', 'Euclid_NISP']):       0.60,
+    frozenset(['JWST', 'Euclid_VIS']):       0.25,
+    frozenset(['JWST', 'Euclid_NISP']):      0.30,
+    frozenset(['Euclid_VIS', 'Euclid_NISP']): 0.30,
+}
+
+# v02 PM pair catalogs (combo_name → file)
+PM_PAIRS = [
+    'HST_Euclid_VIS',
+    'HST_Euclid_NISP',
+    'HST_JWST',
+    'JWST_Euclid_VIS',
+    'JWST_Euclid_NISP',
+]
+
+
+class UnionFind:
+    __slots__ = ('parent', 'rank')
+    def __init__(self, n):
+        self.parent = np.arange(n, dtype=np.int64)
+        self.rank   = np.zeros(n, dtype=np.int32)
+    def find(self, x):
+        p = self.parent
+        root = x
+        while p[root] != root:
+            root = p[root]
+        while p[x] != root:
+            nxt = p[x]; p[x] = root; x = nxt
+        return root
+    def union(self, x, y):
+        rx, ry = self.find(x), self.find(y)
+        if rx == ry: return
+        if self.rank[rx] < self.rank[ry]:
+            rx, ry = ry, rx
+        self.parent[ry] = rx
+        if self.rank[rx] == self.rank[ry]:
+            self.rank[rx] += 1
+
+
+def main():
+    t_total = time.time()
+    print('=' * 78)
+    print('Step 8 — master OR catalog (4-mission union, primary_id JWST > HST > Euclid)')
+    print('=' * 78)
+
+    # ── Load 4 per-mission Gaia-augmented catalogs ───────────────────────
+    cats = {}
+    offsets = {}
+    n_running = 0
+    for m in MISSIONS:
+        print(f'[load] {m} ...', end=' ', flush=True)
+        df = pd.read_parquet(OUT / f'cat_matched_{m}_with_gaia.parquet')
+        df = df.reset_index(drop=True)
+        cats[m] = df
+        offsets[m] = n_running
+        n_running += len(df)
+        print(f'{len(df):,} rows')
+    n_total = n_running
+    print(f'[load] total rows across missions: {n_total:,}')
+
+    # ── Build global arrays for union-find ──────────────────────────────
+    cat_ra  = np.full(n_total, np.nan)
+    cat_dec = np.full(n_total, np.nan)
+    gid     = np.full(n_total, -1, dtype=np.int64)
+    for m in MISSIONS:
+        off = offsets[m]; n = len(cats[m])
+        cat_ra[off:off+n]  = cats[m]['cat_ra'].values
+        cat_dec[off:off+n] = cats[m]['cat_dec'].values
+        gv = cats[m]['gaia_source_id'].values
+        gid[off:off+n] = np.where(pd.isna(gv), -1, gv).astype(np.int64)
+    has_cat  = ~np.isnan(cat_ra)
+    has_gaia = gid > 0
+
+    # ── Tier 1: Gaia-anchored union ─────────────────────────────────────
+    print('[union] tier 1 — Gaia source_id ...')
+    uf = UnionFind(n_total)
+    idx_g = np.where(has_gaia)[0]
+    order = np.argsort(gid[idx_g], kind='stable')
+    idx_g = idx_g[order]
+    gv = gid[idx_g]
+    starts = np.concatenate(([0], np.where(np.diff(gv) != 0)[0] + 1, [len(gv)]))
+    n_uni_gaia = 0
+    for k in range(len(starts) - 1):
+        s, e = starts[k], starts[k+1]
+        if e - s > 1:
+            first = int(idx_g[s])
+            for j in range(s+1, e):
+                uf.union(first, int(idx_g[j]))
+            n_uni_gaia += 1
+    print(f'[union]   gaia clusters created: {n_uni_gaia:,}')
+
+    # ── Tier 2: positional union per mission pair ───────────────────────
+    print('[union] tier 2 — positional pairs')
+    for m1, m2 in combinations(MISSIONS, 2):
+        radius = PAIR_RADIUS_AS[frozenset([m1, m2])]
+        off1, off2 = offsets[m1], offsets[m2]
+        n1, n2 = len(cats[m1]), len(cats[m2])
+        sel1 = has_cat[off1:off1+n1]
+        sel2 = has_cat[off2:off2+n2]
+        idx1l = np.where(sel1)[0]; idx2l = np.where(sel2)[0]
+        if len(idx1l) == 0 or len(idx2l) == 0: continue
+        c1 = SkyCoord(cat_ra[off1+idx1l]*u.deg,  cat_dec[off1+idx1l]*u.deg)
+        c2 = SkyCoord(cat_ra[off2+idx2l]*u.deg,  cat_dec[off2+idx2l]*u.deg)
+        p1, p2, sep, _ = search_around_sky(c1, c2, radius*u.arcsec)
+        if len(p1) == 0: continue
+        order = np.argsort(sep.arcsec)
+        p1s = p1[order]; p2s = p2[order]
+        sa = np.zeros(len(idx1l), dtype=bool); sb = np.zeros(len(idx2l), dtype=bool)
+        keep = np.zeros(len(p1s), dtype=bool)
+        for i in range(len(p1s)):
+            a, b = p1s[i], p2s[i]
+            if not sa[a] and not sb[b]:
+                sa[a] = True; sb[b] = True; keep[i] = True
+        ka = idx1l[p1s[keep]]; kb = idx2l[p2s[keep]]
+        for x, y in zip(off1 + ka, off2 + kb):
+            uf.union(int(x), int(y))
+        print(f'[union]   {m1}↔{m2} at {radius}": {keep.sum():,} unique 1:1 ties')
+
+    # ── Resolve clusters ────────────────────────────────────────────────
+    print('[union] resolving cluster roots ...')
+    roots = np.fromiter((uf.find(i) for i in range(n_total)),
+                        dtype=np.int64, count=n_total)
+    unique_roots, inverse = np.unique(roots, return_inverse=True)
+    n_clusters = len(unique_roots)
+    print(f'[union]   {n_clusters:,} unique sources')
+
+    # ── For each (cluster, mission), pick first row index ───────────────
+    cluster_to_row = {m: np.full(n_clusters, -1, dtype=np.int64) for m in MISSIONS}
+    detected = {m: np.zeros(n_clusters, dtype=bool) for m in MISSIONS}
+    for m in MISSIONS:
+        off = offsets[m]; n = len(cats[m])
+        cl = inverse[off:off+n]
+        # prefer catalog-detected over gaia_only_bright (catalog rows have lower offsets)
+        # use source_type filter to count detected: catalog/catalog+gaia
+        st = cats[m]['source_type'].values
+        is_cat_det = np.isin(st, ['catalog', 'catalog+gaia'])
+        order = np.argsort((~is_cat_det).astype(int), kind='stable')   # cat first
+        cl_sorted  = cl[order]
+        first      = np.concatenate(([True], cl_sorted[1:] != cl_sorted[:-1]))
+        cluster_to_row[m][cl_sorted[first]] = order[first]
+        # detected_in flag: TRUE if any of the cluster's m rows has cat detection
+        np.logical_or.at(detected[m], cl[is_cat_det], True)
+
+    # ── Build master table ──────────────────────────────────────────────
+    print('[build] master table ...')
+    out = {}
+    # mission ID columns (raw IDs per mission)
+    for m in MISSIONS:
+        col = ID_COL[m]
+        idxs = cluster_to_row[m]
+        mask = idxs >= 0
+        src = pd.to_numeric(cats[m][col], errors='coerce').values
+        new_col_name = ('euclid_vis_id' if m == 'Euclid_VIS'
+                        else 'euclid_nisp_id' if m == 'Euclid_NISP'
+                        else col)
+        arr = np.full(n_clusters, np.nan)
+        arr[mask] = src[idxs[mask]]
+        out[new_col_name] = arr
+
+    # detected_in flags
+    for m in MISSIONS:
+        out[f'detected_in_{TAG[m]}'] = detected[m]
+    # source_type per mission
+    for m in MISSIONS:
+        idxs = cluster_to_row[m]
+        mask = idxs >= 0
+        src = cats[m]['source_type'].values
+        arr = np.full(n_clusters, None, dtype=object)
+        arr[mask] = src[idxs[mask]]
+        out[f'source_type_{TAG[m]}'] = arr
+
+    # primary ID — precedence: JWST > HST > Euclid > Gaia (gaia_only_bright fallback)
+    jid = out['jwst_id']
+    hid = out['hst_id']
+    vid = out['euclid_vis_id']
+    nid = out['euclid_nisp_id']
+    # Gaia source ID per cluster (will fill below from per-mission Gaia info)
+    gaia_id_arr = np.full(n_clusters, -1, dtype=np.int64)
+    for m in MISSIONS:
+        idxs = cluster_to_row[m]; mask = idxs >= 0
+        if not mask.any(): continue
+        gvals = cats[m]['gaia_source_id'].values[idxs[mask]]
+        good  = ~pd.isna(gvals) & (gvals > 0)
+        sel_c = np.where(mask)[0][good]
+        sel_c = sel_c[gaia_id_arr[sel_c] < 0]
+        if len(sel_c):
+            gaia_id_arr[sel_c] = gvals[good][:len(sel_c)].astype(np.int64)
+
+    # Precedence (per user 2026-05-27):
+    #   1. JWST ID         → bare integer
+    #   2. Euclid VIS ID   → EuclidID_<id>
+    #   3. HST ID          → HSTID_<id>
+    #   4. Euclid NISP ID  → EuclidID_<id>
+    #   5. Gaia source ID  → GaiaID_<id>  (saturated in every mission)
+    pid  = np.empty(n_clusters, dtype=object)
+    psrc = np.empty(n_clusters, dtype=object)
+    for i in range(n_clusters):
+        if np.isfinite(jid[i]):
+            pid[i]  = str(int(jid[i]));            psrc[i] = 'jwst'
+        elif np.isfinite(vid[i]):
+            pid[i]  = f'EuclidID_{int(vid[i])}';   psrc[i] = 'euclid_vis'
+        elif np.isfinite(hid[i]):
+            pid[i]  = f'HSTID_{int(hid[i])}';      psrc[i] = 'hst'
+        elif np.isfinite(nid[i]):
+            pid[i]  = f'EuclidID_{int(nid[i])}';   psrc[i] = 'euclid_nisp'
+        elif gaia_id_arr[i] > 0:
+            pid[i]  = f'GaiaID_{gaia_id_arr[i]}';  psrc[i] = 'gaia_only'
+        else:
+            pid[i]  = f'UNK_{i}';                  psrc[i] = 'unknown'
+    out['primary_id']     = pid
+    out['primary_source'] = psrc
+
+    # ── Canonical Gaia (24 cols) — prefer JWST > VIS > NISP > HST ───────
+    GAIA_COLS = [c for c in cats['HST'].columns if c.startswith('gaia_')]
+    for col in GAIA_COLS:
+        dt = cats['HST'][col].dtype
+        out[col] = (np.full(n_clusters, np.nan) if dt.kind in 'fiu'
+                    else np.full(n_clusters, None, dtype=object))
+    filled = np.zeros(n_clusters, dtype=bool)
+    for m in ['JWST', 'Euclid_VIS', 'Euclid_NISP', 'HST']:
+        idxs = cluster_to_row[m]; mask = idxs >= 0
+        if not mask.any(): continue
+        gv = cats[m]['gaia_source_id'].values[idxs[mask]]
+        good = ~pd.isna(gv) & (gv > 0)
+        sel_cluster = np.where(mask)[0][good]
+        sel_cluster = sel_cluster[~filled[sel_cluster]]
+        if len(sel_cluster) == 0: continue
+        sel_local = idxs[sel_cluster]
+        for col in GAIA_COLS:
+            out[col][sel_cluster] = cats[m][col].values[sel_local]
+        filled[sel_cluster] = True
+
+    # ── Per-mission cat / DAO columns ────────────────────────────────────
+    for m in MISSIONS:
+        suffix = TAG[m]
+        idxs = cluster_to_row[m]; mask = idxs >= 0
+        for col in cats[m].columns:
+            if col.startswith('gaia_'): continue
+            new = f'{col}_{suffix}'
+            src = cats[m][col].values
+            if src.dtype.kind in 'fiu':
+                arr = np.full(n_clusters, np.nan)
+            elif src.dtype.kind == 'b':
+                arr = np.full(n_clusters, False)
+            else:
+                arr = np.full(n_clusters, None, dtype=object)
+            arr[mask] = src[idxs[mask]]
+            out[new] = arr
+
+    # ── is_point_source / is_agn_qso — aggregate from ALL 9 refined catalogs
+    print('[flags] aggregating is_point_source / is_agn_qso from 9 refined cats ...')
+    out['is_point_source'] = np.zeros(n_clusters, dtype=bool)
+    out['is_agn_qso']      = np.zeros(n_clusters, dtype=bool)
+
+    # Build per-cluster lookup keys
+    cluster_keys = {}   # (kind, id) → cluster index
+    for ci in range(n_clusters):
+        if np.isfinite(jid[ci]): cluster_keys[('j', int(jid[ci]))] = ci
+        if np.isfinite(hid[ci]): cluster_keys[('h', int(hid[ci]))] = ci
+        if np.isfinite(vid[ci]): cluster_keys[('v', int(vid[ci]))] = ci
+        if np.isfinite(nid[ci]): cluster_keys[('n', int(nid[ci]))] = ci
+        if gaia_id_arr[ci] > 0:  cluster_keys[('g', int(gaia_id_arr[ci]))] = ci
+
+    REFINED_FILES = [
+        'refined_HST_JWST.parquet',
+        'refined_HST_Euclid_VIS.parquet',
+        'refined_HST_Euclid_NISP.parquet',
+        'refined_JWST_Euclid_VIS.parquet',
+        'refined_JWST_Euclid_NISP.parquet',
+        'refined_Euclid_VIS_Euclid_NISP.parquet',
+        'refined_HST_JWST_Euclid_VIS.parquet',
+        'refined_HST_JWST_Euclid_NISP.parquet',
+        'refined_HST_JWST_Euclid_VIS_Euclid_NISP.parquet',
+    ]
+    ps_total = 0; agn_total = 0
+    for fname in REFINED_FILES:
+        p = OUT / fname
+        if not p.exists():
+            continue
+        rdf = pd.read_parquet(p, columns=[
+            c for c in [
+                'is_point_source','jwst_id_jwst','hst_id_hst',
+                'euclid_id_vis','euclid_id_nisp','gaia_source_id'
+            ] if True
+        ] if False else None)   # read all
+        # Determine ID columns present
+        id_cols = [
+            ('j', 'jwst_id_jwst'),
+            ('h', 'hst_id_hst'),
+            ('v', 'euclid_id_vis'),
+            ('n', 'euclid_id_nisp'),
+            ('g', 'gaia_source_id'),
+        ]
+        if 'is_point_source' not in rdf.columns:
+            continue
+        ps_vals = rdf['is_point_source'].values
+        for kind, col in id_cols:
+            if col not in rdf.columns:
+                continue
+            vals = pd.to_numeric(rdf[col], errors='coerce').astype('Int64')
+            for ri in np.where(ps_vals & vals.notna().values)[0]:
+                k = (kind, int(vals.iloc[ri]))
+                ci = cluster_keys.get(k)
+                if ci is not None:
+                    out['is_point_source'][ci] = True
+        ps_total = int(out['is_point_source'].sum())
+
+    # is_agn_qso from v02 PM catalogs (which carry the flag) +
+    # direct CW AGN/QSO lookup for sources without JWST detection.
+    from astropy.io import fits
+    CW_PATH = '/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits'
+    with fits.open(CW_PATH) as hdul:
+        photo = hdul['PHOTOMETRY HOTCOLD AND SE++'].data
+        lephare = hdul['LEPHARE'].data
+        cw_id  = np.asarray(photo['id']).astype(np.int64)
+        cw_ra  = np.asarray(photo['ra']).astype(float)
+        cw_dec = np.asarray(photo['dec']).astype(float)
+        lp_type = np.asarray(lephare['type']).astype(np.int64)
+        chandra = np.asarray(lephare['flag_chandra']).astype(float) > 0.5
+    agn_mask = (lp_type == 2) | chandra
+    cw_agn_ids = set(cw_id[agn_mask].tolist())
+    # direct match by JWST id
+    for ci in range(n_clusters):
+        if np.isfinite(jid[ci]) and int(jid[ci]) in cw_agn_ids:
+            out['is_agn_qso'][ci] = True
+    # position match for non-JWST sources
+    agn_ra = cw_ra[agn_mask]; agn_dec = cw_dec[agn_mask]
+    cq = SkyCoord(agn_ra*u.deg, agn_dec*u.deg)
+    # use the best available position from each cluster
+    cluster_ra  = np.full(n_clusters, np.nan)
+    cluster_dec = np.full(n_clusters, np.nan)
+    for m in ['JWST', 'Euclid_VIS', 'Euclid_NISP', 'HST']:
+        idxs = cluster_to_row[m]; mask = idxs >= 0
+        # only fill clusters whose ra is still NaN
+        need = mask & ~np.isfinite(cluster_ra)
+        sel = np.where(need)[0]
+        if len(sel) == 0: continue
+        cluster_ra[sel]  = cats[m]['cat_ra'].values[idxs[sel]]
+        cluster_dec[sel] = cats[m]['cat_dec'].values[idxs[sel]]
+    have_pos = np.isfinite(cluster_ra)
+    if have_pos.any():
+        cc = SkyCoord(cluster_ra[have_pos]*u.deg, cluster_dec[have_pos]*u.deg)
+        idx_q, idx_c, sep, _ = search_around_sky(cq, cc, 0.3*u.arcsec)
+        match_clusters = np.where(have_pos)[0][np.unique(idx_c)]
+        out['is_agn_qso'][match_clusters] = True
+    agn_total = int(out['is_agn_qso'].sum())
+    print(f'[flags]   is_point_source: {ps_total:,}   is_agn_qso: {agn_total:,}')
+
+    # ── PM info from 5 v02 pair catalogs ─────────────────────────────────
+    print('[pm] joining v02 PM info from 5 pairs ...')
+    PM_COLS_SRC = ['pmra', 'pmdec', 'pmtot', 'pmra_err', 'pmdec_err', 'pmtot_err',
+                    'pm_flag', 'pm_method']
+    # Pre-allocate columns
+    for pair in PM_PAIRS:
+        for col in PM_COLS_SRC:
+            if col in ('pm_flag', 'pm_method'):
+                out[f'{col}_{pair}'] = np.full(n_clusters, None, dtype=object)
+            else:
+                out[f'{col}_{pair}'] = np.full(n_clusters, np.nan)
+
+    for pair in PM_PAIRS:
+        pm_path = OUT / f'refined_{pair}_with_pm_v02.parquet'
+        if not pm_path.exists():
+            print(f'[pm]   {pair}: file missing, skipping')
+            continue
+        pm = pd.read_parquet(pm_path)
+        # Build lookup by primary key.  Use jwst_id if JWST in pair, else
+        # by (hst_id, euclid_id) tuple, falling back to position-uniqueness
+        # via id pair.
+        if 'JWST' in pair:
+            keys = pd.to_numeric(pm['jwst_id_jwst'], errors='coerce').astype('Int64')
+            lookup = {int(k): i for i, k in enumerate(keys.values) if pd.notna(k)}
+            # match by jwst_id in master
+            for ci in range(n_clusters):
+                if np.isfinite(jid[ci]):
+                    j = int(jid[ci])
+                    if j in lookup:
+                        ri = lookup[j]
+                        for col in PM_COLS_SRC:
+                            if col in pm.columns:
+                                out[f'{col}_{pair}'][ci] = pm[col].iloc[ri]
+        else:
+            # HST_Euclid_VIS or HST_Euclid_NISP
+            tag1 = 'hst'
+            tag2 = 'vis' if 'Euclid_VIS' in pair else 'nisp'
+            id1_col = 'hst_id_hst'
+            id2_col = 'euclid_id_vis' if tag2 == 'vis' else 'euclid_id_nisp'
+            keys = pd.to_numeric(pm[id1_col], errors='coerce').astype('Int64')
+            lookup = {int(k): i for i, k in enumerate(keys.values) if pd.notna(k)}
+            for ci in range(n_clusters):
+                if np.isfinite(hid[ci]):
+                    h = int(hid[ci])
+                    if h in lookup:
+                        ri = lookup[h]
+                        for col in PM_COLS_SRC:
+                            if col in pm.columns:
+                                out[f'{col}_{pair}'][ci] = pm[col].iloc[ri]
+        n_joined = int(np.sum(np.isfinite(out[f'pmtot_{pair}'])))
+        print(f'[pm]   {pair}: {n_joined:,} sources got PM info')
+
+    df_out = pd.DataFrame(out)
+
+    # ── Reorder columns: meta first ─────────────────────────────────────
+    meta = ['primary_id', 'primary_source',
+            'hst_id', 'jwst_id', 'euclid_vis_id', 'euclid_nisp_id',
+            'detected_in_hst', 'detected_in_jwst',
+            'detected_in_vis', 'detected_in_nisp',
+            'source_type_hst', 'source_type_jwst',
+            'source_type_vis', 'source_type_nisp',
+            'is_point_source', 'is_agn_qso']
+    gaia_block = [c for c in df_out.columns if c.startswith('gaia_')]
+    pm_block   = [c for c in df_out.columns
+                   if any(c.startswith(f'{p}_') or c.endswith(f'_{pair}')
+                          for p in ('pmra','pmdec','pmtot','pmra_err','pmdec_err','pmtot_err','pm_flag','pm_method')
+                          for pair in PM_PAIRS)]
+    rest = [c for c in df_out.columns
+             if c not in meta + gaia_block + pm_block]
+    final_order = meta + gaia_block + pm_block + rest
+    final_order = [c for c in final_order if c in df_out.columns]
+    df_out = df_out[final_order]
+
+    # ── Write ────────────────────────────────────────────────────────────
+    print(f'[save] {len(df_out):,} rows × {len(df_out.columns)} cols')
+    out_parq = OUT / 'master_or_catalog_v01.parquet'
+    df_out.to_parquet(out_parq, index=False)
+    if len(df_out) * len(df_out.columns) < 300_000_000:
+        df_out.to_csv(OUT / 'master_or_catalog_v01.csv', index=False)
+        print(f'[save]   wrote {out_parq.name} + .csv')
+    else:
+        print(f'[save]   wrote {out_parq.name} (CSV skipped — too large)')
+
+    # ── Summary ──────────────────────────────────────────────────────────
+    print()
+    print('=' * 78)
+    print('Summary')
+    print('=' * 78)
+    print(f'Total unique sources:           {len(df_out):,}')
+    for m in MISSIONS:
+        det = int(df_out[f'detected_in_{TAG[m]}'].sum())
+        print(f'  detected in {m:<14} {det:>10,}')
+    print(f'primary_source counts:')
+    print(df_out['primary_source'].value_counts().to_string())
+    print(f'is_point_source:                {int(df_out["is_point_source"].sum()):,}')
+    print(f'is_agn_qso:                     {int(df_out["is_agn_qso"].sum()):,}')
+    for pair in PM_PAIRS:
+        n = int(np.sum(df_out[f'pmtot_{pair}'].notna()))
+        print(f'PM info from {pair:<24} {n:>10,} sources')
+
+    print(f'\nWall time: {time.time() - t_total:.1f}s')
+
+
+if __name__ == '__main__':
+    main()
