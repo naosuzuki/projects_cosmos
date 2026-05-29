@@ -99,7 +99,7 @@ def worker_diff(args):
             sci_h = fits.open(sci_path, memmap=True)
             sci_hdu = sci_h["SCI"] if "SCI" in [x.name for x in sci_h] else sci_h[0]
             sci_wcs = WCS(sci_hdu.header)
-            sci_data = np.asarray(sci_hdu.data, dtype=np.float32)
+            sci_data = sci_hdu.data   # KEEP as memmap — slice before astype (per CLAUDE.md)
             sci_hdr = sci_hdu.header
             sci_ps = float(np.sqrt(np.abs(np.linalg.det(sci_wcs.pixel_scale_matrix)))) * 3600.0
         except Exception as e:
