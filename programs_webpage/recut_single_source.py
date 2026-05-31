@@ -78,9 +78,13 @@ def render_gray(data, png_path, label_lines):
     cy, cx = ny // 2, nx // 2
     half = max(5, min(cy, cx) // 4)
     val = float(np.nanmax(bw[cy-half:cy+half, cx-half:cx+half]))
-    # Auto-scale to central peak. Lower floor (0.05) prevents vmax ≈ 0
-    # on noise-only cutouts; otherwise vmax follows the source brightness.
-    maximum = max(0.05, val * 0.85)
+    # vmax: blend 1/3 old (floor=1.0) + 2/3 new (floor=0.05) per user 2026-05-28.
+    # For bright sources (val*0.85 > 1.0) both branches collapse to val*0.85 →
+    # unchanged. For faint sources the blend gives vmax somewhere between the
+    # too-dim old (vmax=1.0) and the too-bright new (vmax=val*0.85).
+    vmax_old = max(1.0,  val * 0.85)
+    vmax_new = max(0.05, val * 0.85)
+    maximum = (vmax_old + 2.0 * vmax_new) / 3.0
 
     fig = plt.figure(figsize=(4, 4))
     ax = fig.add_subplot(111)
