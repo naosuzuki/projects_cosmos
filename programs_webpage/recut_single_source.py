@@ -175,11 +175,10 @@ def render_rgb_nisp(b_data, g_data, r_data, png_path, label_lines):
     # safely under 1/0.85=1.18 (saturation threshold). NISP, even AFTER bg
     # subtraction, has peak_sqrt ~ 1.0-2.0 (its 300mas pixels integrate ~100x
     # more source photons per pixel than JWST's 30mas), so floor=1.0 saturates
-    # many bright sources. floor=6.0 (user-tuned 2026-05-28; iterated 1.0 →
-    # 2.5 → 4.0 → 6.0) keeps all but the very brightest NISP sources clear
-    # of saturation. Typical NISP source (peak_sqrt~1.5) displays at 25% grey;
-    # saturation only at peak_sqrt > 7.1 (extreme).
-    maximum = max(6.0, maximum * 0.85)
+    # many bright sources. floor=7.0 (user-final 2026-05-28; iterated
+    # 1.0 → 2.5 → 4.0 → 6.0 → 7.0). Typical NISP source (peak_sqrt~1.5) at
+    # 21% grey; saturation only at peak_sqrt > 8.2 (rare).
+    maximum = max(7.0, maximum * 0.85)
 
     rgb = make_rgb(r, g, b, interval=ManualInterval(vmin=minimum, vmax=maximum))
     fig = plt.figure(figsize=(4, 4))
