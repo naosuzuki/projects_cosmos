@@ -25,7 +25,27 @@ SURVEY_BANDS = {"hst": ["F814W"], "jwst": ["F115W","F150W","F277W","F444W"],
                 "vis": ["VIS"], "nisp": ["Y","J","H"]}
 SAT_BANDS = ["F814W","F115W","F150W","F277W","F444W","VIS"]
 MAG_FLOOR = 21.0
-SHARP_LO, SHARP_HI = 0.40, 0.85
+# HST F814W 5σ depth in COSMOS ≈ 27.0 mag. A candidate fainter than this in
+# its DETECTION band cannot be cross-validated against HST (HST literally
+# cannot see it), so HST non-detection becomes uninformative. Cap accepted
+# candidates at HST depth — primarily restricts JWST detections (JWST F115W
+# goes to ~27.2, F444W to ~27.6) which can find faint sources HST misses.
+# User-set 2026-05-28 after reviewing v05 cand_00001 (mag_F814W=27.86) and
+# cand_00002 (mag_F814W=28.32) as JWST-only-because-too-faint, not transients.
+# User 2026-05-28 (after reviewing v05 top 25 — 0/25 were real SNe, all
+# persistent multi-survey or extended galaxies). Four interim patches:
+#   (1) MAG_FAINT_HST = HST 3σ depth (was 5σ): visually we can see down to
+#       3σ; sources fainter than 3σ can't be cross-checked by HST.
+#   (2) SHARP_HI tightened 0.85 → 0.75: rejects extended galaxies with
+#       compact knots that previously slipped through.
+#   (3) HST persistence veto: snr_F814W ≥ 3 → reject (visible in HST = not
+#       a transient).
+#   (4) Euclid-VIS persistence veto: snr_VIS ≥ 3 → reject (same reasoning).
+# Underlying CNN is still flawed (it ranks persistent compacts highly); v06
+# multi-epoch training will fix that. These patches just hide the worst FPs.
+MAG_FAINT_HST = 27.8        # HST F814W 3σ point-source depth (COSMOS-Web)
+HST_VIS_SNR_VETO = 3.0       # reject if HST or Euclid-VIS aperture snr ≥ this
+SHARP_LO, SHARP_HI = 0.40, 0.75
 RND_LIM = 0.50
 NF_LIM  = 0.25
 TOP_N_WEB = 500
@@ -150,7 +170,8 @@ def main():
     sn_idx = np.where(is_sn)[0]
     sn_idx = sn_idx[np.argsort(-comp_conf[sn_idx])]
     rows = []
-    n_sat = 0; n_morph = 0; n_cross = 0; n_snr = 0; n_mag = 0
+    n_sat = 0; n_morph = 0; n_cross = 0; n_snr = 0; n_mag = 0; n_too_faint = 0
+    n_hst_visible = 0; n_vis_visible = 0   # new persistence vetoes
     for i in sn_idx:
         det_name = which[i]
         bfd = bands_per_label.get(det_name, [])
@@ -178,6 +199,19 @@ def main():
             elif len(ms) == 1 and ms[0] < 8: n_cross += 1; continue
         if best_snr < 5.0: n_snr += 1; continue
         if best_mag <= 0 or best_mag < MAG_FLOOR: n_mag += 1; continue
+        # HST-depth cap: reject if detection-band mag is fainter than HST can
+        # cross-check. Mostly bites JWST detections (the only telescope that
+        # goes deeper than HST). Without this we accept "JWST sees it, HST
+        # doesn't" cases that are actually "HST can't see anything that faint".
+        if best_mag > MAG_FAINT_HST: n_too_faint += 1; continue
+        # PERSISTENCE VETOES (added 2026-05-28). A real SN is absent in
+        # both the HST epoch (2005-2008) and Euclid VIS depth. If either
+        # shows the source at ≥ 3σ aperture SNR, it's a persistent host —
+        # not a transient.
+        if float(SNR["F814W"][i]) >= HST_VIS_SNR_VETO:
+            n_hst_visible += 1; continue
+        if float(SNR["VIS"][i]) >= HST_VIS_SNR_VETO:
+            n_vis_visible += 1; continue
         comp_conf[i] = float(comp_conf[i]) * dndm_prior(best_mag)
         r = {"id": "cand_xxxxx", "primary_id": str(pid[i]),
              "telescope": det_name,
@@ -204,6 +238,10 @@ def main():
     for rk, r in enumerate(rows, start=1):
         r["id"] = f"cand_{rk:05d}"
     log(f"raw 1-of-3: {int(is_sn.sum()):,}  filters: sat={n_sat} morph={n_morph} "
+        f"too_faint(>HST_depth_{MAG_FAINT_HST}) = {n_too_faint}; "
+        f"hst_visible(snr>={HST_VIS_SNR_VETO})={n_hst_visible} "
+        f"vis_visible={n_vis_visible}")
+    log(f"  ... continued: "
         f"cross={n_cross} snr={n_snr} mag={n_mag}  FINAL: {len(rows)}")
 
     if rows:
@@ -237,6 +275,9 @@ def main():
             f"JWST={int(det_jwst.sum()):,} VIS={int(det_vis.sum()):,} "
             f"NISP={int(det_nisp.sum()):,} Euclid={int(det_euclid.sum()):,}<br>",
             f"<b>1-of-3 raw:</b> {int(is_sn.sum()):,}<br>",
+            f"&minus;too_faint(>HST_3&sigma;_depth_{MAG_FAINT_HST}) {n_too_faint}, "
+            f"&minus;hst_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_hst_visible}, "
+            f"&minus;vis_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_vis_visible}, "
             f"&minus;sat {n_sat}, &minus;morph {n_morph}, &minus;cross {n_cross}, "
             f"&minus;snr {n_snr}, &minus;mag {n_mag}<br>",
             f"<b>FINAL candidates:</b> <span style='color:#d80'>{len(rows):,}</span>",
