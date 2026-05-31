@@ -171,9 +171,14 @@ def render_rgb_nisp(b_data, g_data, r_data, png_path, label_lines):
         val = float(np.nanmax(img[cy-half:cy+half, cx-half:cx+half]))
         if val > maximum:
             maximum = val
-    # JWST-style floor (1.0). After bg-sub, NISP source peaks are now in the
-    # same scale range as JWST, so the same floor works for both.
-    maximum = max(1.0, maximum * 0.85)
+    # vmax floor: JWST uses 1.0 because JWST peak_sqrt is typically 0.3-0.7,
+    # safely under 1/0.85=1.18 (the saturation threshold). NISP, even AFTER
+    # bg subtraction, has peak_sqrt ~ 1.0-2.0 (its 300mas pixels integrate
+    # ~100x more source photons per pixel than JWST's 30mas), so floor=1.0
+    # saturates many bright sources. floor=2.5 keeps the SAME saturation
+    # behaviour as JWST in proportional terms: typical sources at 40-80%
+    # grey, only very bright (peak_sqrt > 2.94) saturate.
+    maximum = max(2.5, maximum * 0.85)
 
     rgb = make_rgb(r, g, b, interval=ManualInterval(vmin=minimum, vmax=maximum))
     fig = plt.figure(figsize=(4, 4))
