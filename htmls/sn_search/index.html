@@ -1,0 +1,128 @@
+<!doctype html><html><head>
+<title>COSMOS SN search — all versions</title>
+<meta charset="utf-8">
+<style>
+body{font-family:serif;background:#fafafa;margin:0;padding:0;color:#222}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+h1{font-size:26px;margin:0 0 6px 0}
+.lede{color:#666;font-style:italic;margin:0 0 24px 0}
+.v{background:#fff;border:1px solid #ddd;border-radius:6px;padding:18px 22px;margin:0 0 18px 0;
+   box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.v h2{margin:0 0 4px 0;font-size:21px}
+.v .tag{font-size:12px;color:#666;font-weight:normal;margin-left:8px}
+.v .meta{font-family:monospace;font-size:12px;color:#555;margin:8px 0}
+.v .desc{margin:10px 0}
+.v ul{margin:8px 0 0 0;padding-left:22px}
+.v a{color:#06c;text-decoration:none}
+.v a:hover{text-decoration:underline}
+.badge-good{display:inline-block;background:#d6f5d6;color:#262;padding:2px 8px;border-radius:10px;
+            font-size:11px;font-weight:bold}
+.badge-warn{display:inline-block;background:#fff5b0;color:#7a5;padding:2px 8px;border-radius:10px;
+            font-size:11px;font-weight:bold}
+.badge-bad{display:inline-block;background:#fee;color:#a22;padding:2px 8px;border-radius:10px;
+           font-size:11px;font-weight:bold}
+.foot{color:#888;font-size:12px;margin-top:30px;padding-top:14px;border-top:1px solid #ddd}
+code{background:#f0f0f0;padding:1px 5px;border-radius:3px;font-size:12px}
+</style>
+</head><body><div class="wrap">
+
+<h1>COSMOS SN search — all versions</h1>
+<p class="lede">Pipeline for finding supernovae in the COSMOS field by combining HST ACS,
+JWST NIRCam, and Euclid (VIS + NISP) imaging. Each version is a different
+detection method. Latest version on top.</p>
+
+<!-- ================== v05 (top, latest) ================== -->
+<div class="v">
+  <h2>v05 — Synthetic-injection CNN <span class="tag">latest CNN attempt</span></h2>
+  <div class="meta">38,993 candidates &middot; recovered <b>1/17</b> known SNe in-sky
+      &middot; <span class="badge-warn">limited: CNN over-fires on hosts</span></div>
+  <div class="desc">
+    Per-survey CNNs retrained with <b>thousands of synthetic SN injections</b> (Gaussian
+    PSFs at random sky positions, dN/dm-distributed magnitudes) instead of just
+    rotating the 17 real SNe like v03. Thresholds set to 80% LOO recall. Same
+    1-of-3 telescope rule (HST / JWST / Euclid, where Euclid = VIS or NISP).
+    The bigger training set let the LOO test reach 17/17 HST recall, but
+    <b>in-sky recovery is still 1/17</b> — the CNN fires on persistent host
+    galaxies in every survey, so real SNe trip the 1-of-3 rule. The single-epoch
+    photometry can't tell a SN+host from a host alone.
+  </div>
+  <ul>
+    <li><a href="v05/index.html">Stats &amp; ranked table</a></li>
+    <li><a href="v05/polished_top200/index.html">Polished image gallery — top 200</a> (paginated, 8 pages × 25)</li>
+  </ul>
+</div>
+
+<!-- ================== v04 ================== -->
+<div class="v">
+  <h2>v04 — Difference imaging <span class="tag">validated on known SNe</span></h2>
+  <div class="meta">424,577 candidates @ ≥5σ &middot; per-band residual SNR up to 1163 on known SNe
+      &middot; <span class="badge-good">isolates real transients</span></div>
+  <div class="desc">
+    Pixel-level difference imaging: for each candidate, take HST F814W (2005-2008,
+    pre-dates JWST/Euclid epochs) as a <b>SN-free template</b>, reproject onto the science
+    image's WCS, PSF-match and scale to the local annulus, then subtract. A real
+    modern-epoch transient leaves a strong positive residual at the catalogue position
+    in JWST or Euclid bands; persistent hosts cancel out. Validated on the 17 known
+    SNe: most have per-band residual SNR ~10-1000 (e.g. SN 78323: H-band 1163σ),
+    HST SNe correctly absent (they're in the template).
+    Detection rule: ≥2 of 4 JWST bands ≥5σ OR (Euclid VIS ≥5σ or ≥2 of 3 NISP bands ≥5σ).
+    The 5σ threshold currently lets ~85% of sources through (residuals from imperfect
+    PSF matching) — tuning the threshold up to ~15-20σ would keep all known SNe and
+    cut FPs dramatically.
+  </div>
+  <ul>
+    <li><a href="v04/index.html">Stats &amp; ranked table</a></li>
+    <li><a href="v04/polished_top200/index.html">Polished image gallery — top 200</a> (paginated, 8 pages × 25)</li>
+  </ul>
+</div>
+
+<!-- ================== v03 ================== -->
+<div class="v">
+  <h2>v03 — Per-survey CNN, corrected labels <span class="tag">first principled CNN pipeline</span></h2>
+  <div class="meta">112,399 candidates &middot; recovered <b>1/17</b> known SNe in-sky
+      &middot; <span class="badge-bad">CNN learnt host morphology, not transients</span></div>
+  <div class="desc">
+    First version built against the cleaned master catalogue (<code>master_or_catalog_v03.parquet</code>:
+    1.21M rows, after removing Gaia stars / AGN / PM-significant / saturated sources). Per-survey
+    CNNs trained on the discovery-telescope SNe (HST: 3, JWST: 13, NISP: 1) with rotation +
+    magnitude-scaled augmentation; FPR=10<sup>−3</sup> threshold. 1-of-3 telescope rule (HST /
+    JWST / Euclid). Discovered the fundamental limitation: the CNN learns "compact source on a
+    host" rather than the transient signature, and the 1-of-3 rule then rejects real SNe because
+    their hosts trip the CNN in every survey. Same dataset, same rules — different result from
+    v05 because v05 has bigger/more independent positives, but the same in-sky pathology.
+  </div>
+  <ul>
+    <li><a href="v03/index.html">Stats &amp; ranked table</a></li>
+    <li><a href="v03/polished_top100/index.html">Polished image gallery — top 100</a></li>
+  </ul>
+</div>
+
+<!-- ================== v01 (bottom) ================== -->
+<div class="v">
+  <h2>v01 — Original baseline <span class="tag">superseded</span></h2>
+  <div class="meta">4,960 candidates &middot; <span class="badge-bad">labelling bug</span></div>
+  <div class="desc">
+    First end-to-end pipeline against the pre-v03 master catalogue. Labelling bug:
+    all 17 known SNe were marked positive in every survey (rather than only their
+    discovery telescope), so the CNN learned "any compact source = SN" for every
+    survey. Top candidates were dominated by host-galaxy false positives. This
+    discovery is what motivated v03's per-discovery-telescope label scheme and
+    the upstream master-catalogue cleanup (programs_star v02 → v03).
+  </div>
+  <ul>
+    <li><a href="v01/index.html">Stats &amp; ranked table</a></li>
+    <li><a href="v01/polished_top100/index.html">Polished image gallery — top 100</a></li>
+    <li><a href="v01/diagnostic/index.html">Diagnostic page (per-source breakdowns)</a></li>
+    <li><a href="v01/polished/index.html">Polished webpage (legacy layout)</a></li>
+  </ul>
+</div>
+
+<div class="foot">
+  Pipeline scripts: <code>~/github/projects_cosmos/programs_webpage/</code> &middot;
+  Catalogues: <code>~/github/projects_cosmos/csvfiles_sn/</code> &middot;
+  Master catalogue: <code>~/github/projects_cosmos/csvfiles_star/master_or_catalog_v03.parquet</code>
+  <br>Page generated <span id="ts"></span>.
+  <script>document.getElementById('ts').textContent=new Date().toLocaleString();</script>
+</div>
+
+</div></body></html>
