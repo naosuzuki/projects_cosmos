@@ -139,6 +139,13 @@ def render_rgb_nisp(b_data, g_data, r_data, png_path, label_lines):
     user feedback that the prior NISP-specific recipe (minimum=1e-5,
     multiplier=1.2) made NISP cutouts visibly brighter than the contemporaneous
     JWST RGBs on the same page.
+
+    2026-05-28 (later): bump vmax floor 1.0 → 3.0. Empirically NISP has
+    10-50x higher sky background than HST/JWST/VIS in sqrt-stretched space
+    (300mas pixels collect ~100x more sky photons per pixel, plus higher
+    IR sky). At floor=1.0, NISP background (sqrt ~0.4-1.5) saturates 40-100%
+    of the display range, washing the image out. floor=3.0 puts bg at 13-50%
+    (visible noise, not dominant) and central source at 30-70% grey.
     """
     minimum = 1e-4
     b = np.sqrt(np.where(b_data > minimum, b_data, minimum))
@@ -153,7 +160,7 @@ def render_rgb_nisp(b_data, g_data, r_data, png_path, label_lines):
         val = float(np.nanmax(img[cy-half:cy+half, cx-half:cx+half]))
         if val > maximum:
             maximum = val
-    maximum = max(1.0, maximum * 0.85)
+    maximum = max(3.0, maximum * 0.85)
 
     rgb = make_rgb(r, g, b, interval=ManualInterval(vmin=minimum, vmax=maximum))
     fig = plt.figure(figsize=(4, 4))
