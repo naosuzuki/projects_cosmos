@@ -45,6 +45,14 @@ MAG_FLOOR = 21.0
 # multi-epoch training will fix that. These patches just hide the worst FPs.
 MAG_FAINT_HST = 27.8        # HST F814W 3σ point-source depth (COSMOS-Web)
 HST_VIS_SNR_VETO = 3.0       # reject if HST or Euclid-VIS aperture snr ≥ this
+# 2026-05-28 (later): NISP persistence veto. The blending fear that originally
+# excluded NISP from the veto turned out NOT to be the dominant case for the
+# top candidates — for #2/#4/#5/#7/#8 the NISP DAO peak is squarely at the
+# candidate position (sep_Y ≤ 0.3") with consistent Y/J/H mags ≈ 20 (high-z
+# dropout galaxies, bright IR, faint optical). Use ≥2 of 3 NISP bands above
+# NISP_SNR_VETO to qualify as persistent (the "2-of-3 bands" requirement
+# protects against single-band noise spikes that could mimic NISP detection).
+NISP_SNR_VETO = 3.0
 SHARP_LO, SHARP_HI = 0.40, 0.75
 RND_LIM = 0.50
 NF_LIM  = 0.25
@@ -171,7 +179,7 @@ def main():
     sn_idx = sn_idx[np.argsort(-comp_conf[sn_idx])]
     rows = []
     n_sat = 0; n_morph = 0; n_cross = 0; n_snr = 0; n_mag = 0; n_too_faint = 0
-    n_hst_visible = 0; n_vis_visible = 0   # new persistence vetoes
+    n_hst_visible = 0; n_vis_visible = 0; n_nisp_visible = 0   # persistence vetoes
     for i in sn_idx:
         det_name = which[i]
         bfd = bands_per_label.get(det_name, [])
@@ -212,6 +220,13 @@ def main():
             n_hst_visible += 1; continue
         if float(SNR["VIS"][i]) >= HST_VIS_SNR_VETO:
             n_vis_visible += 1; continue
+        # NISP persistence veto: high-z dropout galaxies (bright in NISP IR,
+        # faint in optical HST/VIS) mimic the SN signature in HST + VIS. If
+        # NISP catches a source at this position in ≥2 of 3 bands at ≥3σ,
+        # it's a real IR source — reject.
+        n_nisp_bands_hit = sum(1 for b in ("Y","J","H") if float(SNR[b][i]) >= NISP_SNR_VETO)
+        if n_nisp_bands_hit >= 2:
+            n_nisp_visible += 1; continue
         comp_conf[i] = float(comp_conf[i]) * dndm_prior(best_mag)
         r = {"id": "cand_xxxxx", "primary_id": str(pid[i]),
              "telescope": det_name,
@@ -240,7 +255,8 @@ def main():
     log(f"raw 1-of-3: {int(is_sn.sum()):,}  filters: sat={n_sat} morph={n_morph} "
         f"too_faint(>HST_depth_{MAG_FAINT_HST}) = {n_too_faint}; "
         f"hst_visible(snr>={HST_VIS_SNR_VETO})={n_hst_visible} "
-        f"vis_visible={n_vis_visible}")
+        f"vis_visible={n_vis_visible} "
+        f"nisp_visible(>=2of3@{NISP_SNR_VETO}sigma)={n_nisp_visible}")
     log(f"  ... continued: "
         f"cross={n_cross} snr={n_snr} mag={n_mag}  FINAL: {len(rows)}")
 
@@ -278,6 +294,7 @@ def main():
             f"&minus;too_faint(>HST_3&sigma;_depth_{MAG_FAINT_HST}) {n_too_faint}, "
             f"&minus;hst_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_hst_visible}, "
             f"&minus;vis_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_vis_visible}, "
+            f"&minus;nisp_visible(&ge;2of3@{NISP_SNR_VETO}&sigma;) {n_nisp_visible}, "
             f"&minus;sat {n_sat}, &minus;morph {n_morph}, &minus;cross {n_cross}, "
             f"&minus;snr {n_snr}, &minus;mag {n_mag}<br>",
             f"<b>FINAL candidates:</b> <span style='color:#d80'>{len(rows):,}</span>",
