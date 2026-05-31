@@ -140,14 +140,25 @@ def render_rgb_nisp(b_data, g_data, r_data, png_path, label_lines):
     multiplier=1.2) made NISP cutouts visibly brighter than the contemporaneous
     JWST RGBs on the same page.
 
-    2026-05-28 (later): bump vmax floor 1.0 → 3.0. Empirically NISP has
-    10-50x higher sky background than HST/JWST/VIS in sqrt-stretched space
-    (300mas pixels collect ~100x more sky photons per pixel, plus higher
-    IR sky). At floor=1.0, NISP background (sqrt ~0.4-1.5) saturates 40-100%
-    of the display range, washing the image out. floor=3.0 puts bg at 13-50%
-    (visible noise, not dominant) and central source at 30-70% grey.
+    2026-05-28 (final iteration): per-channel background subtraction +
+    JWST-style vmin/vmax (floor=1.0). NISP sky is 10-50x higher than
+    HST/JWST/VIS in sqrt-units; just adjusting vmin/vmax can't compress
+    the elevated sky pedestal into JWST's display range. After subtracting
+    the per-channel median background, NISP residual values behave like
+    JWST naturally does (bg ~ 0, source above), and the SAME vmin/vmax
+    that work for JWST produce the SAME visual outcome for NISP.
     """
     minimum = 1e-4
+    # Per-channel background subtraction (median of the cutout). NISP sky
+    # is 10-50x higher than HST/JWST/VIS in sqrt-units; subtraction gives a
+    # zero-mean image that scales like JWST.
+    def _sub_bg(d):
+        if d is None or not np.any(np.isfinite(d)):
+            return d
+        return d - float(np.nanmedian(d))
+    b_data = _sub_bg(b_data)
+    g_data = _sub_bg(g_data)
+    r_data = _sub_bg(r_data)
     b = np.sqrt(np.where(b_data > minimum, b_data, minimum))
     g = np.sqrt(np.where(g_data > minimum, g_data, minimum))
     r = np.sqrt(np.where(r_data > minimum, r_data, minimum))
@@ -160,7 +171,9 @@ def render_rgb_nisp(b_data, g_data, r_data, png_path, label_lines):
         val = float(np.nanmax(img[cy-half:cy+half, cx-half:cx+half]))
         if val > maximum:
             maximum = val
-    maximum = max(3.0, maximum * 0.85)
+    # JWST-style floor (1.0). After bg-sub, NISP source peaks are now in the
+    # same scale range as JWST, so the same floor works for both.
+    maximum = max(1.0, maximum * 0.85)
 
     rgb = make_rgb(r, g, b, interval=ManualInterval(vmin=minimum, vmax=maximum))
     fig = plt.figure(figsize=(4, 4))
