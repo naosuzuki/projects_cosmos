@@ -133,8 +133,14 @@ def render_rgb_jwst(b_data, g_data, r_data, png_path, label_lines):
 
 
 def render_rgb_nisp(b_data, g_data, r_data, png_path, label_lines):
-    """Euclid NISP color recipe: sqrt, max*1.2."""
-    minimum = 1e-5
+    """Euclid NISP color recipe.
+
+    2026-05-28: matched to JWST recipe (minimum=1e-4, multiplier=0.85) per
+    user feedback that the prior NISP-specific recipe (minimum=1e-5,
+    multiplier=1.2) made NISP cutouts visibly brighter than the contemporaneous
+    JWST RGBs on the same page.
+    """
+    minimum = 1e-4
     b = np.sqrt(np.where(b_data > minimum, b_data, minimum))
     g = np.sqrt(np.where(g_data > minimum, g_data, minimum))
     r = np.sqrt(np.where(r_data > minimum, r_data, minimum))
@@ -147,7 +153,7 @@ def render_rgb_nisp(b_data, g_data, r_data, png_path, label_lines):
         val = float(np.nanmax(img[cy-half:cy+half, cx-half:cx+half]))
         if val > maximum:
             maximum = val
-    maximum = max(1.0, maximum * 1.2)
+    maximum = max(1.0, maximum * 0.85)
 
     rgb = make_rgb(r, g, b, interval=ManualInterval(vmin=minimum, vmax=maximum))
     fig = plt.figure(figsize=(4, 4))
