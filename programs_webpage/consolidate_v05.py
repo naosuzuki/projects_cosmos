@@ -3,13 +3,19 @@
 csvfiles_sn/tbl_sn_candidates_v05.csv and htmls/sn_search/v05/index.html.
 """
 import warnings; warnings.filterwarnings("ignore")
-import sys, csv, time, json
+import sys, os, csv, time, json, math
 from pathlib import Path
+from collections import defaultdict
 import numpy as np
 import pyarrow.parquet as pq
 import torch
 
 sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+import recut_3_hst as R
+from astropy.io import fits
+from astropy.wcs import WCS
+from scipy.spatial import cKDTree
+MASTER = Path("/Users/suzuki/github/projects_cosmos/csvfiles_star/master_or_catalog_v03.parquet")
 
 CSV_DIR  = Path("/Users/suzuki/github/projects_cosmos/csvfiles_sn")
 PART_DIR = CSV_DIR / "_partial"
@@ -53,13 +59,121 @@ HST_VIS_SNR_VETO = 3.0       # reject if HST or Euclid-VIS aperture snr ≥ this
 # NISP_SNR_VETO to qualify as persistent (the "2-of-3 bands" requirement
 # protects against single-band noise spikes that could mimic NISP detection).
 NISP_SNR_VETO = 3.0
+# 2026-05-28 patch 6: NISP TIGHT-APERTURE re-measurement. Original NISP
+# aperture (1.0 × FWHM ≈ 0.55″) sums host-galaxy + nearby-source flux,
+# inflating mags by 2-3 mag (see candidates 671543, 481171, 548679: tight
+# 0.3 × FWHM aperture gives mag ~23-24, wide gives mag ~20-21). The veto
+# above uses the WIDE-aperture snr (still useful for catching strong cases).
+# For BORDERLINE cases — wide-aperture snr below veto threshold but real
+# faint source AT-position — we re-measure with TIGHT aperture and apply
+# the veto on tight snr too.
+NISP_TIGHT_APER_MULT = 0.3   # fraction of FWHM for tight aperture
+NISP_TIGHT_SNR_VETO = 3.0    # apply same SNR threshold on tight measurement
+
+# 2026-05-28 patch 7: high-PM star check. Some stars have proper motion
+# 2-5″ over the HST-to-JWST baseline (17 yr) — they appear as TWO
+# separate catalog entries (different positions, never matched). The
+# HST persistence veto (snr_F814W at JWST position) misses them since the
+# HST flux moved away. Catch them by searching the HST DAO catalog for
+# ANY detection within HST_PM_SEARCH_RADIUS_AS of the candidate position
+# that is not the candidate itself. User identified examples: #1 (270470)
+# has HST DAO at 2.5″, #16 #22 same pattern.
+HST_PM_SEARCH_RADIUS_AS = 5.0
+HST_PM_NEIGHBOR_SNR_MIN = 5.0    # require HST DAO snr above this to flag
+
+# Morphology gates (G2-G4 in CLAUDE.md §2.1) — accidentally dropped earlier
 SHARP_LO, SHARP_HI = 0.40, 0.75
+RND_LIM = 0.50
+NF_LIM  = 0.25
 RND_LIM = 0.50
 NF_LIM  = 0.25
 TOP_N_WEB = 500
 
 
 def log(msg): print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def load_hst_dao_kdtree():
+    """Load HST DAO positions from master catalog, build KDTree for fast 5\"
+    neighbor search. Returns (tree, ra_arr, dec_arr, pid_arr, snr_arr)."""
+    t = pq.read_table(MASTER, columns=["primary_id","dao_F814W_ra_hst",
+                                       "dao_F814W_dec_hst","dao_F814W_snr_hst"])
+    ra = t["dao_F814W_ra_hst"].to_numpy(zero_copy_only=False)
+    dec = t["dao_F814W_dec_hst"].to_numpy(zero_copy_only=False)
+    snr = t["dao_F814W_snr_hst"].to_numpy(zero_copy_only=False)
+    pids = np.array(t["primary_id"].to_pylist(), dtype=object)
+    ok = np.isfinite(ra) & np.isfinite(dec) & np.isfinite(snr) & (snr >= HST_PM_NEIGHBOR_SNR_MIN)
+    ra = ra[ok]; dec = dec[ok]; snr = snr[ok]; pids = pids[ok]
+    # KDTree on equirectangular projection (RA × cos(median dec), Dec) in deg,
+    # then convert query radius to deg via simple cos(dec) factor at median dec
+    med_dec = float(np.median(dec))
+    cosd = math.cos(math.radians(med_dec))
+    coords = np.column_stack([ra * cosd, dec])
+    tree = cKDTree(coords)
+    return tree, ra, dec, pids, snr, cosd
+
+
+def nisp_tight_aper(ra, dec, sci_data, wcs, hdr, fwhm_as, aper_mult):
+    """Aperture photometry at smaller aperture for one source.
+    Returns (mag, snr)."""
+    try:
+        sx, sy = wcs.all_world2pix(ra, dec, 0)
+    except Exception:
+        return -1.0, 0.0
+    sx, sy = float(sx), float(sy)
+    if not (np.isfinite(sx) and np.isfinite(sy)): return -1.0, 0.0
+    ps = float(np.sqrt(np.abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600.0
+    cy, cx = int(round(sy)), int(round(sx))
+    n = 30; half = n // 2
+    y0, y1 = cy-half, cy+half; x0, x1 = cx-half, cx+half
+    ny, nx = sci_data.shape[-2:]
+    if y0 < 0 or x0 < 0 or y1 > ny or x1 > nx: return -1.0, 0.0
+    sub = sci_data[y0:y1, x0:x1].astype(np.float64)
+    cy2 = sy - y0; cx2 = sx - x0
+    yy, xx = np.indices(sub.shape)
+    rr = np.sqrt((xx-cx2)**2 + (yy-cy2)**2)
+    aper_r = aper_mult * fwhm_as / ps
+    ring_in = 2.0 * fwhm_as / ps; ring_out = 3.5 * fwhm_as / ps
+    in_aper = rr <= aper_r; in_ring = (rr >= ring_in) & (rr <= ring_out)
+    if int(in_aper.sum()) < 1 or int(in_ring.sum()) < 5: return -1.0, 0.0
+    bg = float(np.nanmedian(sub[in_ring])); sub2 = sub - bg
+    n_ap = int(in_aper.sum())
+    flux = float(np.nansum(sub2[in_aper]))
+    sig = float(np.nanstd(sub[in_ring])) * math.sqrt(n_ap)
+    snr = flux / (sig + 1e-30)
+    zp = (hdr.get("ZP") or hdr.get("MAGZP") or hdr.get("PHOTZP") or 23.9)
+    mag = (float(zp) - 2.5 * math.log10(flux)) if flux > 0 else -1.0
+    return mag, float(snr)
+
+
+def measure_nisp_tight(survivors, te_array, ra_array, dec_array):
+    """Re-measure NISP photometry with tight aperture for the candidate
+    indices in `survivors`. Returns dict keyed by source index: per-band
+    (mag, snr). Groups requests by tile to minimize FITS opens."""
+    by_tile = defaultdict(list)
+    for i in survivors:
+        t = str(te_array[i]) if te_array[i] else None
+        if t: by_tile[t].append((i, float(ra_array[i]), float(dec_array[i])))
+    nisp_fwhm = {"Y": FWHM_AS["Y"], "J": FWHM_AS["J"], "H": FWHM_AS["H"]}
+    nisp_R = {"Y": "NIR-Y", "J": "NIR-J", "H": "NIR-H"}
+    out = {i: {b: (-1.0, 0.0) for b in ("Y","J","H")} for i in survivors}
+    for tile, srcs in by_tile.items():
+        for b in ("Y","J","H"):
+            path = R.resolve_euclid_path(tile, nisp_R[b])
+            if not path or not os.path.exists(path): continue
+            try:
+                with fits.open(path, memmap=True) as h:
+                    sci = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
+                    wcs = WCS(sci.header)
+                    data = sci.data
+                    hdr = sci.header
+                    for (i, r, d) in srcs:
+                        m, s = nisp_tight_aper(r, d, data, wcs, hdr,
+                                               nisp_fwhm[b], NISP_TIGHT_APER_MULT)
+                        out[i][b] = (m, s)
+            except Exception:
+                continue
+    return out
 
 
 def dndm_prior(mag):
@@ -177,9 +291,17 @@ def main():
 
     sn_idx = np.where(is_sn)[0]
     sn_idx = sn_idx[np.argsort(-comp_conf[sn_idx])]
+
+    # PATCH 7: load HST DAO KDTree for the high-PM star neighbor check
+    log("  building HST DAO KDTree for high-PM neighbor search ...")
+    t_pm0 = time.time()
+    pm_tree, pm_ra, pm_dec, pm_pid, pm_snr, pm_cosd = load_hst_dao_kdtree()
+    log(f"  HST DAO tree: {len(pm_ra):,} entries, built in {time.time()-t_pm0:.1f}s")
     rows = []
     n_sat = 0; n_morph = 0; n_cross = 0; n_snr = 0; n_mag = 0; n_too_faint = 0
     n_hst_visible = 0; n_vis_visible = 0; n_nisp_visible = 0   # persistence vetoes
+    n_pm_star = 0   # PATCH 7: high-PM HST neighbor
+    pm_info = {}    # idx -> (sep_arcsec, neighbor_pid, neighbor_snr) for diagnostics
     for i in sn_idx:
         det_name = which[i]
         bfd = bands_per_label.get(det_name, [])
@@ -227,6 +349,24 @@ def main():
         n_nisp_bands_hit = sum(1 for b in ("Y","J","H") if float(SNR[b][i]) >= NISP_SNR_VETO)
         if n_nisp_bands_hit >= 2:
             n_nisp_visible += 1; continue
+        # PATCH 7: high-PM star check — search HST DAO within 5″ for an
+        # unmatched detection (catches stars that moved >0.5″ between HST and
+        # JWST epochs, so they decouple as TWO catalog entries).
+        ra0, dec0 = float(ra[i]), float(dec[i])
+        this_pid = str(pid[i])
+        pt = np.array([ra0*pm_cosd, dec0])
+        nb_idx = pm_tree.query_ball_point(pt, HST_PM_SEARCH_RADIUS_AS/3600.0)
+        pm_hit = False
+        for k in nb_idx:
+            if pm_pid[k] == this_pid: continue   # candidate's own HST entry
+            dra = (pm_ra[k]-ra0)*pm_cosd*3600
+            ddec = (pm_dec[k]-dec0)*3600
+            sep = math.sqrt(dra*dra + ddec*ddec)
+            if 0.5 < sep < HST_PM_SEARCH_RADIUS_AS:
+                pm_info[i] = (sep, str(pm_pid[k]), float(pm_snr[k]))
+                pm_hit = True; break
+        if pm_hit:
+            n_pm_star += 1; continue
         comp_conf[i] = float(comp_conf[i]) * dndm_prior(best_mag)
         r = {"id": "cand_xxxxx", "primary_id": str(pid[i]),
              "telescope": det_name,
@@ -248,7 +388,41 @@ def main():
             v = float(P[s][i]) if np.isfinite(P[s][i]) else float("nan")
             r[f"cnn_conf_{s}"] = f"{v:.4f}" if v == v else "nan"
         r["composite_confidence"] = f"{float(comp_conf[i]):.4f}"
+        r["_idx"] = int(i)   # private — popped before CSV write
         rows.append(r)
+
+    # PATCH 6: NISP TIGHT-APERTURE re-measurement for survivors. Big aperture
+    # was used for the wide-aperture veto (caught the obvious cases); now
+    # re-measure NISP at 0.3 × FWHM aperture and apply the same SNR threshold.
+    log(f"  re-measuring NISP at tight aperture ({NISP_TIGHT_APER_MULT}xFWHM) for {len(rows)} survivors ...")
+    t_t = time.time()
+    tight = measure_nisp_tight([r["_idx"] for r in rows], te, ra, dec)
+    log(f"  tight NISP done in {time.time()-t_t:.1f}s")
+    final_rows = []; n_nisp_tight_visible = 0
+    for r in rows:
+        i = r["_idx"]
+        tnphot = tight.get(i, {"Y":(-1.0,0.0),"J":(-1.0,0.0),"H":(-1.0,0.0)})
+        n_hit = sum(1 for b in ("Y","J","H") if tnphot[b][1] >= NISP_TIGHT_SNR_VETO)
+        if n_hit >= 2:
+            n_nisp_tight_visible += 1
+            continue
+        # add tight measurements + PM info to the row for the CSV
+        for b in ("Y","J","H"):
+            m, s = tnphot[b]
+            r[f"mag_{b}_tight"]  = f"{m:.2f}" if m != -1.0 else "-1"
+            r[f"snr_{b}_tight"]  = f"{s:.2f}"
+        if i in pm_info:
+            sep, npid, nsnr = pm_info[i]
+            r["hst_pm_neighbor_sep"] = f"{sep:.2f}"
+            r["hst_pm_neighbor_pid"] = npid
+            r["hst_pm_neighbor_snr"] = f"{nsnr:.1f}"
+        else:
+            r["hst_pm_neighbor_sep"] = ""
+            r["hst_pm_neighbor_pid"] = ""
+            r["hst_pm_neighbor_snr"] = ""
+        r.pop("_idx")
+        final_rows.append(r)
+    rows = final_rows
     rows.sort(key=lambda r: -float(r["composite_confidence"]))
     for rk, r in enumerate(rows, start=1):
         r["id"] = f"cand_{rk:05d}"
@@ -256,7 +430,9 @@ def main():
         f"too_faint(>HST_depth_{MAG_FAINT_HST}) = {n_too_faint}; "
         f"hst_visible(snr>={HST_VIS_SNR_VETO})={n_hst_visible} "
         f"vis_visible={n_vis_visible} "
-        f"nisp_visible(>=2of3@{NISP_SNR_VETO}sigma)={n_nisp_visible}")
+        f"nisp_visible_wide(>=2of3@{NISP_SNR_VETO}sigma)={n_nisp_visible} "
+        f"nisp_visible_tight(0.3xFWHM)={n_nisp_tight_visible} "
+        f"pm_star({HST_PM_SEARCH_RADIUS_AS:.0f}\"_HST_neighbor)={n_pm_star}")
     log(f"  ... continued: "
         f"cross={n_cross} snr={n_snr} mag={n_mag}  FINAL: {len(rows)}")
 
@@ -294,7 +470,9 @@ def main():
             f"&minus;too_faint(>HST_3&sigma;_depth_{MAG_FAINT_HST}) {n_too_faint}, "
             f"&minus;hst_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_hst_visible}, "
             f"&minus;vis_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_vis_visible}, "
-            f"&minus;nisp_visible(&ge;2of3@{NISP_SNR_VETO}&sigma;) {n_nisp_visible}, "
+            f"&minus;nisp_visible_wide(&ge;2of3@{NISP_SNR_VETO}&sigma;) {n_nisp_visible}, "
+            f"&minus;nisp_visible_tight(0.3&times;FWHM) {n_nisp_tight_visible}, "
+            f"&minus;pm_star(HST_DAO_within_{HST_PM_SEARCH_RADIUS_AS:.0f}&Prime;) {n_pm_star}, "
             f"&minus;sat {n_sat}, &minus;morph {n_morph}, &minus;cross {n_cross}, "
             f"&minus;snr {n_snr}, &minus;mag {n_mag}<br>",
             f"<b>FINAL candidates:</b> <span style='color:#d80'>{len(rows):,}</span>",
