@@ -29,6 +29,20 @@ MAG_FLOOR = 21.0
 MAG_FAINT = 28.0
 TOP_N_WEB = 500
 
+# v04 patches 2026-05-28 (mirror of v05 patches after user's top-25 review).
+# v04's partials only have diff_snr/diff_mag; we load RAW aperture phot +
+# morphology from the v05 partials (same source positions, same FITS, just
+# the raw aperture sums instead of the bg-subtracted diff).
+MAG_FAINT_HST = 27.8         # HST F814W 3σ point-source depth (COSMOS-Web)
+HST_VIS_SNR_VETO = 3.0       # reject if HST or Euclid-VIS aperture snr ≥ this
+SHARP_LO, SHARP_HI = 0.40, 0.75
+RND_LIM = 0.50
+NF_LIM  = 0.25
+FWHM_AS = {"F814W":0.134, "F115W":0.057, "F150W":0.057, "F277W":0.130, "F444W":0.160,
+           "VIS":0.194, "Y":0.524, "J":0.537, "H":0.567}
+BAND_SURVEY = {"F814W":"hst", "F115W":"jwst","F150W":"jwst","F277W":"jwst","F444W":"jwst",
+               "VIS":"vis","Y":"nisp","J":"nisp","H":"nisp"}
+
 
 def log(msg): print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -62,7 +76,51 @@ def main():
         MAG[b][idxs] = t["diff_mag"].to_numpy(zero_copy_only=False).astype(np.float32)
         FLUX[b][idxs] = t["diff_flux"].to_numpy(zero_copy_only=False).astype(np.float32)
         avail.append((b, len(idxs)))
-    log(f"available bands: {avail}")
+    log(f"available diff bands: {avail}")
+
+    # --- Load RAW aperture photometry + morphology from v05 partials.
+    # v04 patches need raw snr_F814W / snr_VIS (persistence vetoes), raw
+    # mag in detection band (HST 3σ depth cap), and sharp/rnd morphology
+    # (G1-G4 gate to reject extended galaxies).
+    raw_SNR = {b: np.full(N, 0.0, dtype=np.float32) for b in ["F814W","VIS"]+SCI_BANDS}
+    raw_MAG = {b: np.full(N, -1.0, dtype=np.float32) for b in ["F814W"]+SCI_BANDS}
+    SHARP = {b: np.full(N, np.nan, dtype=np.float32) for b in SCI_BANDS}
+    RND1  = {b: np.full(N, np.nan, dtype=np.float32) for b in SCI_BANDS}
+    RND2  = {b: np.full(N, np.nan, dtype=np.float32) for b in SCI_BANDS}
+    SEP   = {b: np.full(N, np.nan, dtype=np.float32) for b in SCI_BANDS}
+    NFR   = {b: np.full(N,  1.0, dtype=np.float32) for b in SCI_BANDS}
+    SURVEY_BANDS = {"hst": ["F814W"], "jwst": ["F115W","F150W","F277W","F444W"],
+                    "vis": ["VIS"], "nisp": ["Y","J","H"]}
+    for sv, bands in SURVEY_BANDS.items():
+        cp = PART_DIR / f"infer_v05_{sv}.parquet"
+        if not cp.exists():
+            log(f"  [warn] v05 {sv} partial missing — patches will skip {sv}"); continue
+        tt = pq.read_table(cp)
+        ii = tt["idx"].to_numpy(zero_copy_only=False).astype(np.int64)
+        cols = set(tt.column_names)
+        for b in bands:
+            if f"snr_{b}" in cols:
+                raw_SNR[b][ii] = tt[f"snr_{b}"].to_numpy(zero_copy_only=False).astype(np.float32)
+                raw_MAG[b][ii] = tt[f"mag_{b}"].to_numpy(zero_copy_only=False).astype(np.float32)
+            # morphology only stored for SCI_BANDS (no F814W — HST is template)
+            if b in SHARP and f"sharp_{b}" in cols:
+                SHARP[b][ii] = tt[f"sharp_{b}"].to_numpy(zero_copy_only=False).astype(np.float32)
+                RND1[b][ii]  = tt[f"rnd1_{b}"].to_numpy(zero_copy_only=False).astype(np.float32)
+                RND2[b][ii]  = tt[f"rnd2_{b}"].to_numpy(zero_copy_only=False).astype(np.float32)
+                SEP[b][ii]   = tt[f"sep_{b}"].to_numpy(zero_copy_only=False).astype(np.float32)
+                NFR[b][ii]   = tt[f"nanfrac_{b}"].to_numpy(zero_copy_only=False).astype(np.float32)
+    log(f"loaded raw aperture phot + morph from v05 partials")
+
+    G1_TOL = {b: max(0.10, 1.5 * FWHM_AS[b]) for b in SCI_BANDS}
+    def band_morph_ok(b, i):
+        sp = float(SHARP[b][i]); r1 = float(RND1[b][i]); r2 = float(RND2[b][i])
+        sg = float(SEP[b][i]);   nf = float(NFR[b][i])
+        if nf > NF_LIM: return False
+        if not np.isfinite(sg) or sg > G1_TOL[b]: return False
+        if not np.isfinite(sp) or sp < SHARP_LO or sp > SHARP_HI: return False
+        if not np.isfinite(r1) or abs(r1) > RND_LIM: return False
+        if not np.isfinite(r2) or abs(r2) > RND_LIM: return False
+        return True
 
     # Detection in each science band: positive residual snr >= 5 AND mag in range
     det = {b: ((SNR[b] >= SNR_FLOOR) & np.isfinite(MAG[b]) &
@@ -91,6 +149,7 @@ def main():
     sn_idx = sn_idx[np.argsort(-comp_conf[sn_idx])]
 
     rows = []
+    n_hst_visible = 0; n_vis_visible = 0; n_too_faint = 0; n_morph = 0
     for i in sn_idx:
         # Pick best band by SNR
         best_band = ""; best_snr = 0.0; best_mag = -1.0
@@ -98,6 +157,24 @@ def main():
             sv = float(SNR[b][i])
             if sv > best_snr and det[b][i]:
                 best_snr = sv; best_band = b; best_mag = float(MAG[b][i])
+        # --- v04 PATCHES (mirror of v05): persistence vetoes, morphology,
+        # and HST 3σ depth cap. These hide the worst FPs that the diff
+        # imaging + multi-band rule still let through.
+        # (1) HST persistence veto: source visible in HST aperture → not SN
+        if float(raw_SNR["F814W"][i]) >= HST_VIS_SNR_VETO:
+            n_hst_visible += 1; continue
+        # (2) Euclid-VIS persistence veto: same logic
+        if float(raw_SNR["VIS"][i]) >= HST_VIS_SNR_VETO:
+            n_vis_visible += 1; continue
+        # (3) Morphology gate on the detection band (G1-G4 + NaN-frac)
+        if best_band and not band_morph_ok(best_band, i):
+            n_morph += 1; continue
+        # (4) HST 3σ depth cap on the RAW mag in the detection band.
+        # If source is too faint for HST to see, HST non-detection is
+        # uninformative — can't verify it's a transient.
+        raw_best_mag = float(raw_MAG[best_band][i]) if best_band else -1.0
+        if raw_best_mag <= 0 or raw_best_mag > MAG_FAINT_HST:
+            n_too_faint += 1; continue
         # Determine telescope label
         is_j = bool((det["F115W"] | det["F150W"] | det["F277W"] | det["F444W"])[i])
         is_v = bool(det["VIS"][i])
@@ -130,6 +207,9 @@ def main():
     for rk, r in enumerate(rows, start=1):
         r["id"] = f"cand_{rk:05d}"
 
+    log(f"v04 patches: hst_visible(snr>={HST_VIS_SNR_VETO})={n_hst_visible}, "
+        f"vis_visible={n_vis_visible}, morph={n_morph}, "
+        f"too_faint(raw_mag>{MAG_FAINT_HST})={n_too_faint}  ->  FINAL {len(rows)}")
     if rows:
         cols = list(rows[0].keys())
         tmp = OUT_CSV.with_suffix(".csv.tmp")
@@ -160,7 +240,12 @@ def main():
     ]
     for b in SCI_BANDS:
         page.append(f"&nbsp;&nbsp;{b}: {int(det[b].sum()):,}<br>")
-    page.append(f"<b>FINAL candidates (≥1 band ≥{SNR_FLOOR:.0f}σ + full coverage):</b> "
+    page.append(f"<b>Raw v04 diff candidates:</b> {len(sn_idx):,}<br>")
+    page.append(f"&minus;hst_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_hst_visible:,}, "
+                f"&minus;vis_visible {n_vis_visible:,}, "
+                f"&minus;morph {n_morph:,}, "
+                f"&minus;too_faint(raw_mag&gt;{MAG_FAINT_HST}) {n_too_faint:,}<br>")
+    page.append(f"<b>FINAL candidates after v04 patches:</b> "
                 f"<span style='color:#d80'>{len(rows):,}</span></div>")
     page.append("<table><thead><tr><th>rank</th><th>id</th><th>tel</th><th>ra</th><th>dec</th>"
                 "<th>comp_conf</th><th>n_bands</th><th>best</th><th>snr</th><th>mag</th></tr></thead><tbody>")
