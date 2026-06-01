@@ -633,7 +633,7 @@ The fix for the data wall was to expand the validated positive set.
   visually validated **35 of 65** as real in COSMOS-Web.
 * The other 30 are `primer_or_offfield` — **NOT rejected**; likely real but on
   PRIMER / other data, not visible in our COSMOS-Web FITS. Re-check later.
-* **MASTER LIST = 52 validated real SNe** = 17 user-known + 35 validated.
+* **MASTER LIST = 52 validated real SNe** = 21 user-known + 35 validated.
   Breakdown: 48 JWST / 3 HST / 1 EUCLID, all FITS-covered.
 
 Files (canonical):
@@ -641,7 +641,7 @@ Files (canonical):
 csvfiles_sn/master_sn_verdicts.csv  — every candidate + status
       (real | primer_or_offfield | pending); EDIT status here
 csvfiles_sn/master_sn_list.csv      — compiled status==real rows (52)
-csvfiles_sn/master_sn_gallery.csv   — render-ready (known17 first)
+csvfiles_sn/master_sn_gallery.csv   — render-ready (known21 first)
 programs_webpage/build_master_sn.py — seed (no args) / --compile
 programs_webpage/make_master_sn_web.py — render master gallery
 htmls/sn_search/master_sn/index.html   — MASTER SN page (52, static)

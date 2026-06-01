@@ -1,20 +1,20 @@
 sn_name,source,status,telescope,sn_ra,sn_dec,hst_tile,jwst_tile,euclid_tile,z,disc_filter,notes
-130972,known17,real,HST,150.279695,2.041101,052,A4,101542818,,,user-confirmed known SN
-371996,known17,real,HST,150.282844,1.932259,040,A10,101542818,,,user-confirmed known SN
-471959,known17,real,HST,150.278904,2.430962,076,B3,101545698,,,user-confirmed known SN
-318858,known17,real,JWST,150.185337,1.842646,041,A9,101541377,,,user-confirmed known SN
-320233,known17,real,JWST,150.146358,1.86641,041,A9,101541377,,,user-confirmed known SN
-246188,known17,real,JWST,149.90842,1.994614,054,A7,101542816,,,user-confirmed known SN
-296673,known17,real,JWST,150.103129,2.006954,053,A3,101542817,,,user-confirmed known SN
-435613,known17,real,JWST,150.073048,2.530626,089,B2,101545697,,,user-confirmed known SN
-435769,known17,real,JWST,150.108823,2.518886,089,B2,101545697,,,user-confirmed known SN
-468896,known17,real,JWST,150.26457146694182,2.4142228475769287,076,B3,101545698,,,user-confirmed known SN
-9748,known17,real,JWST,149.86509251002576,2.1682127700879295,067,A1,101544256,,,user-confirmed known SN
-19931,known17,real,JWST,149.80315295,2.26388746,067,A1,101544256,,,user-confirmed known SN
-53669,known17,real,JWST,149.99501395,2.16359733,066,A2,101544257,,,user-confirmed known SN
-63919,known17,real,JWST,149.96059337,2.24045999,066,A2,101544256,,,user-confirmed known SN
-78323,known17,real,JWST,150.11312560555407,2.012647241341165,053,A3,101542817,,,user-confirmed known SN
-430352,known17,real,JWST,150.14585818,2.46510338,089,B2,101545697,,,user-confirmed known SN
+130972,known21,real,HST,150.279695,2.041101,052,A4,101542818,,,user-confirmed known SN
+371996,known21,real,HST,150.282844,1.932259,040,A10,101542818,,,user-confirmed known SN
+471959,known21,real,HST,150.278904,2.430962,076,B3,101545698,,,user-confirmed known SN
+318858,known21,real,JWST,150.185337,1.842646,041,A9,101541377,,,user-confirmed known SN
+320233,known21,real,JWST,150.146358,1.86641,041,A9,101541377,,,user-confirmed known SN
+246188,known21,real,JWST,149.90842,1.994614,054,A7,101542816,,,user-confirmed known SN
+296673,known21,real,JWST,150.103129,2.006954,053,A3,101542817,,,user-confirmed known SN
+435613,known21,real,JWST,150.073048,2.530626,089,B2,101545697,,,user-confirmed known SN
+435769,known21,real,JWST,150.108823,2.518886,089,B2,101545697,,,user-confirmed known SN
+468896,known21,real,JWST,150.26457146694182,2.4142228475769287,076,B3,101545698,,,user-confirmed known SN
+9748,known21,real,JWST,149.86509251002576,2.1682127700879295,067,A1,101544256,,,user-confirmed known SN
+19931,known21,real,JWST,149.80315295,2.26388746,067,A1,101544256,,,user-confirmed known SN
+53669,known21,real,JWST,149.99501395,2.16359733,066,A2,101544257,,,user-confirmed known SN
+63919,known21,real,JWST,149.96059337,2.24045999,066,A2,101544256,,,user-confirmed known SN
+78323,known21,real,JWST,150.11312560555407,2.012647241341165,053,A3,101542817,,,user-confirmed known SN
+430352,known21,real,JWST,150.14585818,2.46510338,089,B2,101545697,,,user-confirmed known SN
 2023aeaf,cat65,real,JWST,150.0950000,2.3735028,077,B7,101544257,3.55,F150W,user-validated
 2023adzt,cat65,real,JWST,150.0935667,2.3490167,077,B7,101544257,2.35,F150W,user-validated
 2023aeax,cat65,real,JWST,150.1100042,2.3261028,077,B8,101544257,2.25,F150W,user-validated
@@ -50,8 +50,8 @@ sn_name,source,status,telescope,sn_ra,sn_dec,hst_tile,jwst_tile,euclid_tile,z,di
 2023aead,cat65,real,JWST,150.1542083,2.3437861,077,B8,101544257,0.06,F150W,user-validated
 2023adzk,cat65,real,JWST,150.1733333,2.4042667,077,B3,101545697,0.03,F150W,user-validated
 2023aeaj,cat65,real,JWST,150.1779417,2.2498333,065,B8,101544257,0.01,F150W,user-validated
-64479,user_extract,real,JWST,149.95678152,2.24554778,066,A2,101544256,,F115W,"user-extracted (other session); pick F115W SE sep=1.39"" sharp=0.708"
-39020,user_extract,real,JWST,149.91140979,2.09200089,054,A2,101542816,,F115W,"user-extracted (other session); pick F115W SE sep=0.445"" sharp=0.723"
-239246,user_extract,real,JWST,149.91256119,1.94487803,042,A7,101542816,,F150W,"user-extracted (other session); pick F150W N sep=0.301"" sharp=0.62"
-239301,user_extract,real,JWST,149.86403571,1.96307767,055,A7,101542816,,F150W,"user-extracted (other session); pick F150W NE sep=0.152"" sharp=0.636"
-245766,user_extract,real,JWST,149.86268437,2.00821526,055,A7,101542816,,F150W,"user-extracted (other session); pick F150W SE sep=0.543"" sharp=0.776"
+64479,known21,real,JWST,149.95678152,2.24554778,066,A2,101544256,,F115W,"user-extracted (other session); pick F115W SE sep=1.39"" sharp=0.708"
+39020,known21,real,JWST,149.91140979,2.09200089,054,A2,101542816,,F115W,"user-extracted (other session); pick F115W SE sep=0.445"" sharp=0.723"
+239246,known21,real,JWST,149.91256119,1.94487803,042,A7,101542816,,F150W,"user-extracted (other session); pick F150W N sep=0.301"" sharp=0.62"
+239301,known21,real,JWST,149.86403571,1.96307767,055,A7,101542816,,F150W,"user-extracted (other session); pick F150W NE sep=0.152"" sharp=0.636"
+245766,known21,real,JWST,149.86268437,2.00821526,055,A7,101542816,,F150W,"user-extracted (other session); pick F150W SE sep=0.543"" sharp=0.776"

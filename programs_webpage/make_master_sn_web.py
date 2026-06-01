@@ -6,7 +6,7 @@ validated they are appended to csvfiles_sn/master_sn_list.csv, recompiled to
 master_sn_gallery.csv, and re-rendered here.
 
 Each panel set: JWST blue/red, HST F814W, Euclid VIS, Euclid NISP, labeled
-with name, source (known17/cat65), redshift, and discovery filter.
+with name, source (known21/cat65), redshift, and discovery filter.
 
 Output: htmls/sn_search/master_sn/index.html (+ page PNGs), static (no refresh).
 """
@@ -31,7 +31,7 @@ def _build(top, top_n, n_total, status):
     html = re.sub(r"<meta http-equiv=['\"]refresh['\"][^>]*>", "", html)  # static page
     html = html.replace("sn_search v03", "MASTER SN list")
     html = html.replace("v03 &mdash; live top", "MASTER SUPERNOVA LIST &mdash;")
-    n_k = sum(1 for r in _cat.values() if r.get("source")=="known17")
+    n_k = sum(1 for r in _cat.values() if r.get("source")=="known21")
     n_c = sum(1 for r in _cat.values() if r.get("source")=="cat65")
     banner = (f"<div class='note' style='background:#e0f5e0;border-color:#3a3'>"
               f"<b>Master validated supernova set — {len(_cat)} SNe</b> "
@@ -53,8 +53,8 @@ if __name__ == "__main__":
         src = r.get("source",""); z = r.get("z",""); filt = r.get("disc_filter","")
         zlab = f" &middot; z={z}" if z else ""
         flab = f" &middot; {filt}" if filt else ""
-        tag = ("known17" if src=="known17" else "validated")
-        color = "#06c" if src=="known17" else "#3a7"
+        tag = ("known21" if src=="known21" else "validated")
+        color = "#06c" if src=="known21" else "#3a7"
         return (f"<h3><b>{name}</b> "
                 f"<span style='color:{color}'>[{tag}]{zlab}{flab}</span> &nbsp;<span")
     h = re.sub(r"<h3>([^ <]+) &nbsp; <span", repl, h)
