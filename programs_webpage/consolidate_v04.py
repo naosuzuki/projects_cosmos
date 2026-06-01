@@ -11,11 +11,18 @@ galaxy colour is very atypical; the per-band SNR floor + multi-band
 agreement compensate.
 """
 import warnings; warnings.filterwarnings("ignore")
-import sys, time, csv
+import sys, os, time, csv, math
 from pathlib import Path
 from collections import defaultdict
 import numpy as np
 import pyarrow.parquet as pq
+
+sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+import recut_3_hst as R
+from astropy.io import fits
+from astropy.wcs import WCS
+from scipy.spatial import cKDTree
+MASTER = Path("/Users/suzuki/github/projects_cosmos/csvfiles_star/master_or_catalog_v03.parquet")
 
 CSV_DIR  = Path("/Users/suzuki/github/projects_cosmos/csvfiles_sn")
 PART_DIR = CSV_DIR / "_partial"
@@ -42,6 +49,86 @@ FWHM_AS = {"F814W":0.134, "F115W":0.057, "F150W":0.057, "F277W":0.130, "F444W":0
            "VIS":0.194, "Y":0.524, "J":0.537, "H":0.567}
 BAND_SURVEY = {"F814W":"hst", "F115W":"jwst","F150W":"jwst","F277W":"jwst","F444W":"jwst",
                "VIS":"vis","Y":"nisp","J":"nisp","H":"nisp"}
+
+# Mirrors v05 patches 9, 10, 11 (added 2026-05-28 after v05 review found
+# high-z dropouts and high-PM stars slipping through the basic vetoes).
+NISP_SNR_VETO = 3.0              # wide-aperture NISP veto (raw from v05 NISP partial)
+NISP_TIGHT_APER_MULT = 0.3       # tighter aperture for blending-corrected re-measure
+NISP_TIGHT_SNR_VETO = 3.0
+HST_PM_SEARCH_RADIUS_AS = 5.0    # HST DAO neighbor search radius
+HST_PM_NEIGHBOR_SNR_MIN = 5.0
+
+
+def load_hst_dao_kdtree():
+    """Load HST DAO positions from master catalog, build KDTree."""
+    t = pq.read_table(MASTER, columns=["primary_id","dao_F814W_ra_hst",
+                                       "dao_F814W_dec_hst","dao_F814W_snr_hst"])
+    ra = t["dao_F814W_ra_hst"].to_numpy(zero_copy_only=False)
+    dec = t["dao_F814W_dec_hst"].to_numpy(zero_copy_only=False)
+    snr = t["dao_F814W_snr_hst"].to_numpy(zero_copy_only=False)
+    pids = np.array(t["primary_id"].to_pylist(), dtype=object)
+    ok = np.isfinite(ra) & np.isfinite(dec) & np.isfinite(snr) & (snr >= HST_PM_NEIGHBOR_SNR_MIN)
+    ra, dec, snr, pids = ra[ok], dec[ok], snr[ok], pids[ok]
+    med_dec = float(np.median(dec))
+    cosd = math.cos(math.radians(med_dec))
+    coords = np.column_stack([ra * cosd, dec])
+    return cKDTree(coords), ra, dec, pids, snr, cosd
+
+
+def nisp_tight_aper(ra, dec, sci_data, wcs, hdr, fwhm_as, aper_mult):
+    try:
+        sx, sy = wcs.all_world2pix(ra, dec, 0)
+    except Exception:
+        return -1.0, 0.0
+    sx, sy = float(sx), float(sy)
+    if not (np.isfinite(sx) and np.isfinite(sy)): return -1.0, 0.0
+    ps = float(np.sqrt(np.abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600.0
+    cy, cx = int(round(sy)), int(round(sx))
+    n = 30; half = n//2
+    y0, y1 = cy-half, cy+half; x0, x1 = cx-half, cx+half
+    ny, nx = sci_data.shape[-2:]
+    if y0<0 or x0<0 or y1>ny or x1>nx: return -1.0, 0.0
+    sub = sci_data[y0:y1, x0:x1].astype(np.float64)
+    cy2, cx2 = sy-y0, sx-x0
+    yy, xx = np.indices(sub.shape)
+    rr = np.sqrt((xx-cx2)**2 + (yy-cy2)**2)
+    aper_r = aper_mult * fwhm_as / ps
+    ring_in = 2.0*fwhm_as/ps; ring_out = 3.5*fwhm_as/ps
+    in_aper = rr <= aper_r; in_ring = (rr >= ring_in) & (rr <= ring_out)
+    if int(in_aper.sum())<1 or int(in_ring.sum())<5: return -1.0, 0.0
+    bg = float(np.nanmedian(sub[in_ring])); sub2 = sub - bg
+    n_ap = int(in_aper.sum())
+    flux = float(np.nansum(sub2[in_aper]))
+    sig = float(np.nanstd(sub[in_ring])) * math.sqrt(n_ap)
+    snr = flux / (sig + 1e-30)
+    zp = (hdr.get("ZP") or hdr.get("MAGZP") or hdr.get("PHOTZP") or 23.9)
+    mag = (float(zp) - 2.5*math.log10(flux)) if flux > 0 else -1.0
+    return mag, float(snr)
+
+
+def measure_nisp_tight(survivors, te_arr, ra_arr, dec_arr):
+    by_tile = defaultdict(list)
+    for i in survivors:
+        t = str(te_arr[i]) if te_arr[i] else None
+        if t: by_tile[t].append((i, float(ra_arr[i]), float(dec_arr[i])))
+    nisp_fwhm = {"Y": FWHM_AS["Y"], "J": FWHM_AS["J"], "H": FWHM_AS["H"]}
+    nisp_R = {"Y":"NIR-Y","J":"NIR-J","H":"NIR-H"}
+    out = {i: {b: (-1.0, 0.0) for b in ("Y","J","H")} for i in survivors}
+    for tile, srcs in by_tile.items():
+        for b in ("Y","J","H"):
+            path = R.resolve_euclid_path(tile, nisp_R[b])
+            if not path or not os.path.exists(path): continue
+            try:
+                with fits.open(path, memmap=True) as h:
+                    sci = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
+                    wcs = WCS(sci.header); data = sci.data; hdr = sci.header
+                    for (i, r, d) in srcs:
+                        m, s = nisp_tight_aper(r, d, data, wcs, hdr,
+                                               nisp_fwhm[b], NISP_TIGHT_APER_MULT)
+                        out[i][b] = (m, s)
+            except Exception:
+                continue
+    return out
 
 
 def log(msg): print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -148,8 +235,16 @@ def main():
     comp_conf = n_bands.astype(np.float32) * (max_snr / (max_snr + 20.0))
     sn_idx = sn_idx[np.argsort(-comp_conf[sn_idx])]
 
+    # PATCH 11: HST DAO KDTree for high-PM star check
+    log("  building HST DAO KDTree for PM neighbor check ...")
+    t_pm0 = time.time()
+    pm_tree, pm_ra, pm_dec, pm_pid, pm_snr, pm_cosd = load_hst_dao_kdtree()
+    log(f"  HST DAO tree: {len(pm_ra):,} entries in {time.time()-t_pm0:.1f}s")
+
     rows = []
     n_hst_visible = 0; n_vis_visible = 0; n_too_faint = 0; n_morph = 0
+    n_nisp_wide_visible = 0; n_pm_star = 0
+    pm_info = {}
     for i in sn_idx:
         # Pick best band by SNR
         best_band = ""; best_snr = 0.0; best_mag = -1.0
@@ -175,6 +270,26 @@ def main():
         raw_best_mag = float(raw_MAG[best_band][i]) if best_band else -1.0
         if raw_best_mag <= 0 or raw_best_mag > MAG_FAINT_HST:
             n_too_faint += 1; continue
+        # (5) NISP wide-aperture persistence veto (mirror of v05 patch 9)
+        n_nb = sum(1 for b in ("Y","J","H") if float(raw_SNR[b][i]) >= NISP_SNR_VETO)
+        if n_nb >= 2:
+            n_nisp_wide_visible += 1; continue
+        # (6) High-PM star check (mirror of v05 patch 11)
+        ra0, dec0 = float(ra[i]), float(dec[i])
+        this_pid = str(pid[i])
+        pt = np.array([ra0*pm_cosd, dec0])
+        nb_idx = pm_tree.query_ball_point(pt, HST_PM_SEARCH_RADIUS_AS/3600.0)
+        pm_hit = False
+        for k in nb_idx:
+            if pm_pid[k] == this_pid: continue
+            dra = (pm_ra[k]-ra0)*pm_cosd*3600
+            ddec = (pm_dec[k]-dec0)*3600
+            sep = math.sqrt(dra*dra + ddec*ddec)
+            if 0.5 < sep < HST_PM_SEARCH_RADIUS_AS:
+                pm_info[i] = (sep, str(pm_pid[k]), float(pm_snr[k]))
+                pm_hit = True; break
+        if pm_hit:
+            n_pm_star += 1; continue
         # Determine telescope label
         is_j = bool((det["F115W"] | det["F150W"] | det["F277W"] | det["F444W"])[i])
         is_v = bool(det["VIS"][i])
@@ -202,14 +317,47 @@ def main():
         for b in SCI_BANDS:
             r[f"diff_snr_{b}"] = f"{float(SNR[b][i]):.2f}"
         r["composite_confidence"] = f"{float(comp_conf[i]):.4f}"
+        r["_idx"] = int(i)
         rows.append(r)
+
+    # PATCH 10 (mirror v05): NISP tight-aperture re-measure for survivors
+    log(f"  re-measuring NISP tight aperture ({NISP_TIGHT_APER_MULT}xFWHM) for {len(rows)} survivors ...")
+    t_t = time.time()
+    tight = measure_nisp_tight([r["_idx"] for r in rows], te, ra, dec)
+    log(f"  tight NISP done in {time.time()-t_t:.1f}s")
+    final_rows = []; n_nisp_tight_visible = 0
+    for r in rows:
+        i = r["_idx"]
+        tn = tight.get(i, {"Y":(-1.0,0.0),"J":(-1.0,0.0),"H":(-1.0,0.0)})
+        n_hit = sum(1 for b in ("Y","J","H") if tn[b][1] >= NISP_TIGHT_SNR_VETO)
+        if n_hit >= 2:
+            n_nisp_tight_visible += 1; continue
+        for b in ("Y","J","H"):
+            m, s = tn[b]
+            r[f"mag_{b}_tight"] = f"{m:.2f}" if m != -1.0 else "-1"
+            r[f"snr_{b}_tight"] = f"{s:.2f}"
+        if i in pm_info:
+            sep, npid, nsnr = pm_info[i]
+            r["hst_pm_neighbor_sep"] = f"{sep:.2f}"
+            r["hst_pm_neighbor_pid"] = npid
+            r["hst_pm_neighbor_snr"] = f"{nsnr:.1f}"
+        else:
+            r["hst_pm_neighbor_sep"] = ""
+            r["hst_pm_neighbor_pid"] = ""
+            r["hst_pm_neighbor_snr"] = ""
+        r.pop("_idx")
+        final_rows.append(r)
+    rows = final_rows
 
     for rk, r in enumerate(rows, start=1):
         r["id"] = f"cand_{rk:05d}"
 
     log(f"v04 patches: hst_visible(snr>={HST_VIS_SNR_VETO})={n_hst_visible}, "
         f"vis_visible={n_vis_visible}, morph={n_morph}, "
-        f"too_faint(raw_mag>{MAG_FAINT_HST})={n_too_faint}  ->  FINAL {len(rows)}")
+        f"too_faint(raw_mag>{MAG_FAINT_HST})={n_too_faint}, "
+        f"nisp_wide(>=2of3@{NISP_SNR_VETO})={n_nisp_wide_visible}, "
+        f"nisp_tight(0.3xFWHM)={n_nisp_tight_visible}, "
+        f"pm_star(HST_neighbor_within_5\")={n_pm_star}  ->  FINAL {len(rows)}")
     if rows:
         cols = list(rows[0].keys())
         tmp = OUT_CSV.with_suffix(".csv.tmp")
@@ -244,7 +392,10 @@ def main():
     page.append(f"&minus;hst_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_hst_visible:,}, "
                 f"&minus;vis_visible {n_vis_visible:,}, "
                 f"&minus;morph {n_morph:,}, "
-                f"&minus;too_faint(raw_mag&gt;{MAG_FAINT_HST}) {n_too_faint:,}<br>")
+                f"&minus;too_faint(raw_mag&gt;{MAG_FAINT_HST}) {n_too_faint:,}, "
+                f"&minus;nisp_wide(&ge;2of3@{NISP_SNR_VETO}&sigma;) {n_nisp_wide_visible:,}, "
+                f"&minus;nisp_tight(0.3&times;FWHM) {n_nisp_tight_visible:,}, "
+                f"&minus;pm_star(HST_DAO_within_{HST_PM_SEARCH_RADIUS_AS:.0f}&Prime;) {n_pm_star:,}<br>")
     page.append(f"<b>FINAL candidates after v04 patches:</b> "
                 f"<span style='color:#d80'>{len(rows):,}</span></div>")
     page.append("<table><thead><tr><th>rank</th><th>id</th><th>tel</th><th>ra</th><th>dec</th>"
