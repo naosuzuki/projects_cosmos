@@ -44,7 +44,24 @@ population = faint **on-host cross-band JWST** SNe.
 - `to_input()` = 14ch: 5 σ-units asinh + 5 per-band compactness + 4 (JWST−HST) diff
 - injection: amp ×U(0.35,1.5), 60% on-host (±3px), 40% spread (±8px)
 
-## NEXT ACTION after resume
-1. Read iter-5 (and iter-6 if it ran) result in train_v07_report.txt.
-2. If best ≥40/56 @P≥0.5 → run inference + build candidate gallery for user.
-3. Else iterate per the "KEY DIAGNOSIS" levers above.
+## STATE AT 2026-06-01 10:50 (user left mid-run)
+- Best config = iter-5 (avg+max pool, K=5, 18ep, 14ch). LOO = **32/56 (57%) @P≥0.5**,
+  38-40/56 @P≥0.3. iter-6 (K=9) = 31/56 (ensemble saturated). pos_weight/more-epochs OVERFIT.
+- A FINAL train+save run was launched 10:46 (pid was 44799). It does 4-fold LOO
+  (~9min) then trains+saves a K=5 ensemble to `csvfiles_sn/cnn_v07.pt`. May have
+  finished after the user left — CHECK: `ls -la csvfiles_sn/cnn_v07.pt`.
+- Diagnostic gallery of the 25 LOO-misses: `htmls/sn_search/v07_misses/index.html`.
+  Misses span z=0.01-3.55 (median 0.62); several LOW-z hard-zeros (adzu/aeaj/aead)
+  are suspicious → inspect whether SN is on host core or position is off.
+
+## NEXT ACTION after resume (in order)
+1. `ls -la csvfiles_sn/cnn_v07.pt` — if present, the deployment ensemble is ready.
+   If not, run `python train_v07.py` (cache warm → ~12 min) to produce it.
+2. **Run inference for the user's TOP-100 request:**
+   `python infer_v07.py`  → scores 495,532 HST+JWST sources, ~60-90 min,
+   writes `csvfiles_sn/sn_candidates_v07_scored.parquet` (checkpoints per tile).
+3. Rank by P, render top-100 gallery (adapt make_master_sn_web / make_v07_misses_web
+   pointing at the scored parquet's top 100). Show user — they want to validate
+   the best candidates and "learn from there".
+4. Separately: user was about to inspect the v07_misses gallery (esp. low-z
+   hard-zeros) to decide the next recovery lever (focal loss vs position-fix).
