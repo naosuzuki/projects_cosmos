@@ -69,6 +69,13 @@ NISP_SNR_VETO = 3.0
 # the veto on tight snr too.
 NISP_TIGHT_APER_MULT = 0.3   # fraction of FWHM for tight aperture
 NISP_TIGHT_SNR_VETO = 3.0    # apply same SNR threshold on tight measurement
+# Patch 14: hard-reject Euclid coverage gaps (VIS + NISP both zero at-position;
+# the candidate cannot be cross-checked by Euclid). 35% of post-patch-11 top-79
+# fell in such gaps and silently passed the snr-based vetoes.
+# Patch 15: NISP MAG-based veto. snr-based misses sources where annulus noise
+# is inflated by blending (e.g. #49: NISP mag 19.4-19.9 but snr 2.6-2.9 < 3σ).
+# Mag < 22 in 2 of 3 NISP bands is unambiguously bright → reject.
+NISP_MAG_VETO = 22.0
 
 # 2026-05-28 patch 7: high-PM star check. Some stars have proper motion
 # 2-5″ over the HST-to-JWST baseline (17 yr) — they appear as TWO
@@ -301,6 +308,8 @@ def main():
     n_sat = 0; n_morph = 0; n_cross = 0; n_snr = 0; n_mag = 0; n_too_faint = 0
     n_hst_visible = 0; n_vis_visible = 0; n_nisp_visible = 0   # persistence vetoes
     n_pm_star = 0   # PATCH 7: high-PM HST neighbor
+    n_euclid_gap = 0   # PATCH 14: full Euclid coverage gap (VIS+NISP both 0)
+    n_nisp_mag = 0     # PATCH 15: NISP mag-based veto
     pm_info = {}    # idx -> (sep_arcsec, neighbor_pid, neighbor_snr) for diagnostics
     for i in sn_idx:
         det_name = which[i]
@@ -349,6 +358,23 @@ def main():
         n_nisp_bands_hit = sum(1 for b in ("Y","J","H") if float(SNR[b][i]) >= NISP_SNR_VETO)
         if n_nisp_bands_hit >= 2:
             n_nisp_visible += 1; continue
+        # PATCH 15: NISP MAG-based veto (snr can be suppressed by blending noise
+        # even when the source is unambiguously bright; user found #49 with
+        # NISP mag~19.4-19.9 but snr 2.6-2.9 sneaking past the snr veto).
+        n_nisp_bright = sum(1 for b in ("Y","J","H")
+                            if float(MAG[b][i]) > 0 and float(MAG[b][i]) < NISP_MAG_VETO)
+        if n_nisp_bright >= 2:
+            n_nisp_mag += 1; continue
+        # PATCH 14: Euclid coverage gap. If VIS aperture AND all 3 NISP bands
+        # report exactly snr=0 (mag=-1), the FITS data at this position is
+        # all zeros — Euclid has no usable data here. The candidate cannot be
+        # cross-checked by Euclid; reject (we already rejected if HST visible,
+        # so this combined with HST-non-detection gives no Euclid info).
+        vis_no = (float(SNR["VIS"][i]) == 0.0 and float(MAG["VIS"][i]) == -1.0)
+        nisp_no = all(float(SNR[b][i]) == 0.0 and float(MAG[b][i]) == -1.0
+                      for b in ("Y","J","H"))
+        if vis_no and nisp_no:
+            n_euclid_gap += 1; continue
         # PATCH 7: high-PM star check — search HST DAO within 5″ for an
         # unmatched detection (catches stars that moved >0.5″ between HST and
         # JWST epochs, so they decouple as TWO catalog entries).
@@ -432,6 +458,8 @@ def main():
         f"vis_visible={n_vis_visible} "
         f"nisp_visible_wide(>=2of3@{NISP_SNR_VETO}sigma)={n_nisp_visible} "
         f"nisp_visible_tight(0.3xFWHM)={n_nisp_tight_visible} "
+        f"nisp_mag(<{NISP_MAG_VETO})={n_nisp_mag} "
+        f"euclid_gap={n_euclid_gap} "
         f"pm_star({HST_PM_SEARCH_RADIUS_AS:.0f}\"_HST_neighbor)={n_pm_star}")
     log(f"  ... continued: "
         f"cross={n_cross} snr={n_snr} mag={n_mag}  FINAL: {len(rows)}")
@@ -472,6 +500,8 @@ def main():
             f"&minus;vis_visible(snr&ge;{HST_VIS_SNR_VETO}) {n_vis_visible}, "
             f"&minus;nisp_visible_wide(&ge;2of3@{NISP_SNR_VETO}&sigma;) {n_nisp_visible}, "
             f"&minus;nisp_visible_tight(0.3&times;FWHM) {n_nisp_tight_visible}, "
+            f"&minus;nisp_mag(&lt;{NISP_MAG_VETO}) {n_nisp_mag}, "
+            f"&minus;euclid_gap {n_euclid_gap}, "
             f"&minus;pm_star(HST_DAO_within_{HST_PM_SEARCH_RADIUS_AS:.0f}&Prime;) {n_pm_star}, "
             f"&minus;sat {n_sat}, &minus;morph {n_morph}, &minus;cross {n_cross}, "
             f"&minus;snr {n_snr}, &minus;mag {n_mag}<br>",
