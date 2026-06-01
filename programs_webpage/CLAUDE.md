@@ -487,3 +487,96 @@ that runs, the consolidator-side check is the workaround.
 * CNN-based morphological classifier mentioned as long-term goal —
   current PSF+multi-band approach is the interim hand-engineered
   baseline.
+
+----
+
+## 7. v06 — generative/no-subtraction CNN + the MASTER SN list (2026-06-01)
+
+### 7.0 What the user decided (binding)
+* SN detection rule = **exactly ONE telescope detects** (HST *or* JWST *or*
+  Euclid). Two+ telescopes ⇒ persistent (galaxy/star) ⇒ NOT a SN.
+  Euclid = VIS **AND** NISP (simultaneous epoch). NISP-only ⇒ NISP detector
+  persistence (reject). VIS-only ⇒ artifact (reject). JWST+NISP ⇒ high-z
+  dropout GALAXY (reject), NOT a SN.
+* High-z SN: only the discovery telescope sees it; at our depth the others
+  are too shallow, so "one telescope only" holds even for high-z.
+* Goal: rediscover ≥ 80% of the validated SNe before producing a v06 list.
+* Prefer NO stored cutouts for the future (millions of images). For first
+  trials, caching cutouts on the external disk (/Volumes/My Book) is allowed.
+* The previous-gen CNN in `/Users/suzuki/github/projects_jwst/programs_cosmos/`
+  (`train_supernova_cnn.py`) performed BETTER than v04/v05 — study it.
+
+### 7.1 Guiding papers
+* **TransiNet** (Sedaghat & Mahabal 2018, MNRAS 476, 5365; arXiv:1710.01422):
+  generative encoder-decoder that OUTPUTS the difference image (no explicit
+  subtraction); learns registration+PSF-match+sky+noise internally. Key
+  tricks: L1 loss, "attention trick" (remap target [0,1]→[0,100] so the tiny
+  transient isn't ignored), synthetic training with per-epoch PSF/sky/noise +
+  registration jitter. 98.4% precision / 75.5% recall on CRTS.
+* **Inada, Sako, Acero-Cuellar & Bianco 2026** (AJ, 10.3847/1538-3881/ae38d8):
+  transient detection **WITHOUT image subtraction** — feed search+template
+  pair directly; transformer w/ localized attention. 97.4% (no-diff) vs 97.8%
+  (with-diff); the gap NARROWS with more data. Still uses 51×51 stamps.
+* Synthesis adopted for v06: feed the co-aligned epoch pair directly (no
+  subtraction), HST = template, JWST = science; both 30 mas so alignment is
+  just co-centering.
+
+### 7.2 v06 training design (`programs_webpage/train_v06.py`)
+* 5-channel σ-units input [HST_F814W, F115W, F150W, F277W, F444W], later a
+  10-channel **dual representation** (ch0-4 σ-units asinh = cross-epoch
+  comparable; ch5-9 per-channel peak-norm = within-band compactness).
+* Positives = profile-matched Gaussian injection (HST-only for HST SNe; all
+  4 JWST bands consistent for JWST SNe). Negatives = SAME host w/o injection
+  (paired) + asteroid (1-band) + same-color (F277+F444 only).
+* Cutouts cached at `/Volumes/My Book/data/cosmos_v06/_v06_cutouts_sigma.npz`
+  (σ-units). Training pre-generates samples in RAM, trains on MPS.
+* Validation = **leave-one-out** on the real SNe (train on synthetic + the
+  other real SNe augmented, score the held-out one). HONEST out-of-sample.
+
+### 7.3 KEY LESSONS from the v06 iterations (do not relearn these)
+1. **Pure-synthetic training does NOT transfer** (3/17). Must MIX real SNe
+   (heavily augmented) with synthetic — both papers do this.
+2. **Per-channel [0,1] normalization is a BUG for cross-epoch nets**: it makes
+   a blank HST channel and a SN-bearing JWST channel both peak at 1.0, ERASING
+   the brightness difference that IS the transient. Use **σ-units**
+   (pixel − sky_median)/sky_MAD so channels are physically comparable.
+3. **Few-SN models are high-variance**: per-SN scores swung 1.0↔0.0001 between
+   configs. Fix = **ensemble** (train K=7 models, average sigmoid).
+4. **σ-units (cross-epoch) and compactness (per-band) are COMPLEMENTARY**:
+   σ-units recovers HST + off-host; compactness recovers on-host JWST. The
+   10-channel dual-rep + ensemble was best: **8/17 @P≥0.5, 12/17 @P≥0.3**.
+5. The remaining wall = faint **on-host, cross-band JWST** SNe + too few
+   positives (17). It is DATA-LIMITED, not method-limited.
+6. The previous-gen 34-SN list is **NOT all real** — user said do not use it.
+   Mosaics live on EXTERNAL disk (/Volumes/exdisk1); ≤3 parallel FITS readers
+   or it stalls (0% CPU). MPS GPU work doesn't show in Activity Monitor CPU%.
+
+### 7.4 THE MASTER SUPERNOVA LIST (the unblock — keep growing this)
+The fix for the data wall was to expand the validated positive set.
+* Source catalog: `projects_jwst/programs_cosmos/data/sn_ori.txt` = 65-SN
+  DeCoursey COSMOS-Web catalog (name, RA/Dec, z 0.01-3.55, discovery filter,
+  Ia/cc class). 55/65 fall in our full-coverage footprint.
+* Inspection gallery built at `htmls/sn_search/catalog65_inspect/` → user
+  visually validated **35 of 65** as real in COSMOS-Web.
+* The other 30 are `primer_or_offfield` — **NOT rejected**; likely real but on
+  PRIMER / other data, not visible in our COSMOS-Web FITS. Re-check later.
+* **MASTER LIST = 52 validated real SNe** = 17 user-known + 35 validated.
+  Breakdown: 48 JWST / 3 HST / 1 EUCLID, all FITS-covered.
+
+Files (canonical):
+```
+csvfiles_sn/master_sn_verdicts.csv  — every candidate + status
+      (real | primer_or_offfield | pending); EDIT status here
+csvfiles_sn/master_sn_list.csv      — compiled status==real rows (52)
+csvfiles_sn/master_sn_gallery.csv   — render-ready (known17 first)
+programs_webpage/build_master_sn.py — seed (no args) / --compile
+programs_webpage/make_master_sn_web.py — render master gallery
+htmls/sn_search/master_sn/index.html   — MASTER SN page (52, static)
+```
+Workflow to GROW the list: add/mark `status=real` in master_sn_verdicts.csv →
+`python build_master_sn.py --compile` → re-run make_master_sn_web.py →
+retrain v06 on the larger master_sn_list.csv.
+
+### 7.5 Next step (pending)
+Retrain v06 on the 52-SN master list (48 JWST positives vs the old 13) — this
+directly attacks the data-starvation wall that capped LOO recovery at 8/17.
