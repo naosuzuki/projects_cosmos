@@ -465,6 +465,79 @@ that runs, the consolidator-side check is the workaround.
    angle, which conflicts with the standard N=up E=left convention
    used in HST/Euclid panels.
 
+   **HOW TO ADD this to a new script** that does its own `Cutout2D`
+   (don't import `recut_3_hst.cut()` if you have other reasons to keep
+   the cutout pipeline local — just copy this pattern):
+
+   ```python
+   import numpy as np
+   from astropy.wcs import WCS
+   from astropy.coordinates import SkyCoord
+   from astropy.nddata import Cutout2D
+   from scipy.ndimage import rotate as ndi_rotate
+   from astropy import units as u
+
+   def compute_roll_angle(wcs, ra, dec):
+       """Roll angle [deg] of the spacecraft frame vs ICRS at (ra, dec).
+       After cutting, rotate the data by -roll to put North up.
+       """
+       x0, y0 = wcs.all_world2pix(ra, dec, 0)
+       xn, yn = wcs.all_world2pix(ra, dec + 1.0/3600.0, 0)
+       return float(np.degrees(np.arctan2(float(xn - x0),
+                                          float(yn - y0))))
+
+   def cut_north_up(data, wcs, ra, dec, size_arcsec, is_jwst):
+       """Cutout + (for JWST only) rotation to N=up."""
+       pos = SkyCoord(ra*u.deg, dec*u.deg)
+       c = Cutout2D(data, pos, size=size_arcsec * u.arcsec, wcs=wcs,
+                    mode="partial", fill_value=0.0)
+       arr = np.asarray(c.data, dtype=np.float32)
+       if is_jwst:
+           roll = compute_roll_angle(wcs, ra, dec)
+           arr  = ndi_rotate(arr, -roll, reshape=False, order=3,
+                             mode="constant", cval=0.0)
+       return arr
+   ```
+
+   And at the call site, dispatch on survey:
+
+   ```python
+   arr = cut_north_up(sci_hdu.data, wcs, ra, dec,
+                      size_arcsec=CUT_AS,
+                      is_jwst=(survey == "jwst"))
+   ```
+
+   Why **−roll** and not **+roll**: `compute_roll_angle` returns the
+   angle by which the JWST pixel +y axis is offset clockwise from
+   ICRS-North.  `ndi_rotate(arr, +θ)` rotates the array
+   counter-clockwise by θ.  So `ndi_rotate(arr, -roll)` rotates the
+   data so that what was the spacecraft +y axis ends up pointing
+   North — i.e., N becomes up.
+
+   Why the rotation must happen **after** `Cutout2D`, not before: the
+   full tile is hundreds of MB to tens of GB; rotating it is
+   ~1000× slower than rotating the 80 KB box.  The rotation is also
+   centred on the cutout centre, so doing it on the small slice gives
+   the same result as on the full tile.
+
+   Why we don't reproject (`astropy.wcs.utils.reproject`): reproject is
+   ~10× slower per cutout, runs out of memory on full tiles, and the
+   straight ndi_rotate result is good enough for visual SN panels
+   (PSF-scale astrometry is preserved within ≤ 1 pixel).
+
+   **Files that already get this right** (use as reference):
+   `recut_3_hst.py:cut()` (line ~1067), `recut_3_hst.py:compute_roll_angle()` (line ~173).
+
+   **FIXED 2026-06-01**: `make_v03_polished_web.py:worker_extract()` now
+   rotates JWST cutouts North-up (`_compute_roll_angle` + `ndi_rotate(-roll)`).
+   COSMOS-Web tiles have a ~20° roll. This powers `make_master_sn_web.py`, so
+   the master gallery (`htmls/sn_search/master_sn/`) is now N-up aligned.
+   NOTE: the v03/v04/v05 candidate galleries were rendered BEFORE this fix —
+   re-render them if their JWST orientation matters.
+   - Any other future `make_v##_*_web.py` that re-implements its own
+     Cutout2D loop — search for `Cutout2D` callsites and verify each
+     branch that touches JWST applies the rotation.
+
 5. **`--no-crosshair` for polished output.** The polish step (04_)
    draws its own crosshair. The recut step must NOT draw one on top.
 

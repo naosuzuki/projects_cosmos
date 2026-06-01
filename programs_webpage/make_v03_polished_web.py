@@ -81,14 +81,30 @@ def resolve_path(survey, R_band, tile):
     return R.resolve_euclid_path(tile, R_band)
 
 
+def _compute_roll_angle(wcs, ra, dec):
+    """Roll angle [deg] of the spacecraft frame vs ICRS-North at (ra,dec).
+    After cutting, rotate the data by -roll to put North up. (CLAUDE.md §5.4)"""
+    import numpy as np
+    x0, y0 = wcs.all_world2pix(ra, dec, 0)
+    xn, yn = wcs.all_world2pix(ra, dec + 1.0/3600.0, 0)
+    return float(np.degrees(np.arctan2(float(xn - x0), float(yn - y0))))
+
+
 def worker_extract(args):
-    """Open one (survey, band, tile) FITS once, return cutouts for all sources."""
+    """Open one (survey, band, tile) FITS once, return cutouts for all sources.
+
+    JWST cutouts are rotated North-up (N=up, E=left) to match HST/Euclid —
+    JWST mosaics are in spacecraft-roll orientation otherwise. Per CLAUDE.md
+    §5.4: rotate AFTER Cutout2D (rotating the full tile is ~1000× slower),
+    by -roll via ndi_rotate(order=3). HST and Euclid are already N-up.
+    """
     import warnings; warnings.filterwarnings("ignore")
     from astropy.io import fits
     from astropy.wcs import WCS
     from astropy.coordinates import SkyCoord
     from astropy import units as u
     from astropy.nddata import Cutout2D
+    from scipy.ndimage import rotate as ndi_rotate
     import numpy as np
 
     survey, band, R_band, tile, reqs = args
@@ -98,6 +114,7 @@ def worker_extract(args):
         for key, _, _ in reqs:
             out[(key, survey, band)] = None
         return out
+    is_jwst = (survey == "jwst")
     try:
         with fits.open(path, memmap=True) as h:
             sci_hdu = h["SCI"] if "SCI" in [x.name for x in h] else h[0]
@@ -108,7 +125,12 @@ def worker_extract(args):
                 try:
                     c = Cutout2D(data, pos, size=CUT_AS * u.arcsec, wcs=wcs,
                                  mode="partial", fill_value=0.0)
-                    out[(key, survey, band)] = c.data.astype(np.float32)
+                    arr = c.data.astype(np.float32)
+                    if is_jwst:
+                        roll = _compute_roll_angle(wcs, ra, dec)
+                        arr = ndi_rotate(arr, -roll, reshape=False, order=3,
+                                         mode="constant", cval=0.0).astype(np.float32)
+                    out[(key, survey, band)] = arr
                 except Exception:
                     out[(key, survey, band)] = None
     except Exception:
