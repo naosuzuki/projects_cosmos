@@ -367,6 +367,77 @@ per version.
 
 ----
 
+### v04 / v05 consolidator patches (locked in 2026-05-28 after user's top-25 review)
+
+Both `consolidate_v05.py` (CNN-based 1-of-3 telescope rule) and
+`consolidate_v04.py` (HST-template difference imaging) share the same
+11-patch filter. Locked in after the user reviewed the top 25 of v05 and
+found **0/25 were real SNe** — every one was a known failure mode below.
+After the patches, v05 went 38,993 → 79 candidates, v04 went 424,577 → 712.
+
+Constants in both consolidators:
+```python
+MAG_FAINT_HST       = 27.8   # HST F814W 3σ depth (5σ = 27.2 + 0.55 mag)
+HST_VIS_SNR_VETO    = 3.0   # aperture-SNR threshold for HST/VIS visibility
+NISP_SNR_VETO       = 3.0   # wide-aperture (1.0 × FWHM) NISP threshold
+NISP_TIGHT_APER_MULT= 0.3   # smaller aperture for blending-corrected NISP re-measure
+NISP_TIGHT_SNR_VETO = 3.0
+HST_PM_SEARCH_RADIUS_AS    = 5.0   # HST DAO neighbor search radius
+HST_PM_NEIGHBOR_SNR_MIN    = 5.0   # require HST DAO snr above this to flag
+SHARP_HI = 0.75              # tightened from 0.85; rejects extended galaxies
+```
+
+11 patches in order of application per candidate:
+
+| # | Patch | Rejects |
+|---|---|---|
+| 1 | saturation (any HST/JWST/VIS band mag < 21 with snr ≥ 3) | bright stars |
+| 2 | morphology G2 sharp ∈ [0.40, 0.75] | extended galaxies |
+| 3 | cross-band consistency (multi-band telescopes) | single-band flares |
+| 4 | best-band aperture snr ≥ 5 | marginal |
+| 5 | best-band mag ≥ MAG_FLOOR (21.0) | bright |
+| 6 | best-band mag ≤ MAG_FAINT_HST (27.8) — HST 3σ cap | unverifiable faint |
+| 7 | **HST visible** (snr_F814W ≥ 3) — persistent in old epoch | host galaxies, slow stars |
+| 8 | **Euclid-VIS visible** (snr_VIS ≥ 3) | persistent in Euclid optical |
+| 9 | **NISP wide veto** (≥ 2 of 3 NISP bands at snr ≥ 3, 1.0 × FWHM aperture) | high-z dropouts, IR-bright sources |
+| 10 | **NISP tight veto** (≥ 2 of 3 NISP bands at snr ≥ 3, 0.3 × FWHM aperture) | NISP detections caught after blending correction |
+| 11 | **HST DAO neighbor within 5″** (snr ≥ 5, not the candidate itself) | **high-PM stars** that decouple HST and JWST positions |
+
+Each consolidator also writes new diagnostic columns for visual review:
+`mag_Y_tight, snr_Y_tight, …, mag_H_tight, snr_H_tight, hst_pm_neighbor_sep,
+hst_pm_neighbor_pid, hst_pm_neighbor_snr`.
+
+#### Why patches 9-11 exist (failure modes the basic vetoes miss)
+
+  * **High-z dropout galaxies** (#4, #5, #8, #15 in user's v05 review).
+    Bright in NISP IR (Y/J/H mag ~20), faint/missing in HST + VIS.
+    Visually identical to a SN candidate from HST/VIS-veto alone.
+    Patch 9 + 10 catch them.
+
+  * **NISP blending** (#6, #7, #2 in user's v05 review).
+    NISP 300-mas pixels + 0.5″ aperture sum host + nearby flux at the
+    candidate position. Wide-aperture mag reports the NEIGHBOR brightness
+    (~20 mag), not the SN. Tight 0.3 × FWHM aperture re-measures at the
+    candidate position only. For the user's #6 (671543): wide mag = 20.65
+    snr 5.2 → tight 0.2 × FWHM mag = 23.66 snr 2.1 (no real source).
+
+  * **High-PM stars** (#1, #16, #22 in user's v05 review).
+    Stars with proper motion > 0.5″ over the HST→JWST baseline (~17 yr)
+    appear as TWO separate catalog entries (HST entry at old position,
+    JWST entry at new position; matcher tolerance ~ 0.3-1.0″ doesn't
+    link them). The HST persistence veto (patch 7) measures HST flux AT
+    the JWST position — sees nothing because the source moved. Patch 11
+    searches the HST DAO catalog within 5″ of each candidate; if any
+    UNMATCHED HST DAO entry is found at 0.5″ < sep < 5″, reject.
+    User example #1 (270470): HST DAO at 2.5″ → PM ≈ 145 mas/yr.
+
+The proper fix for #11 is upstream (`programs_star/52_step3_catalog_match_v04.py`):
+do a second matching pass at 5″ for unmatched sources and set
+`is_likely_star=True` with a new `high_pm_inferred=True` column. Until
+that runs, the consolidator-side check is the workaround.
+
+----
+
 ## 5. Common pitfalls (project-specific, in addition to §2.5)
 
 1. **VIS != NISP.** Skip VIS in any multi-band SN logic — VIS is a
