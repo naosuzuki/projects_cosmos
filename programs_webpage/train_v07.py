@@ -714,16 +714,21 @@ def loo_validate():
     log(f"=== LOO RESULT: {rec05}/{len(scores)} recovered at P>=0.5 "
         f"({100*rec05/len(scores):.0f}%) — target >=14/17 (80%) ===")
 
-    # If target met, train FINAL model on synthetic + ALL 17 real SNe for deployment
-    if rec05 >= int(np.ceil(0.8*len(scores))):
-        log("target met — training FINAL deployment model on synthetic + all real positives")
-        Xr = np.concatenate([real_aug[s] for s in pos_sids], axis=0)
-        X = np.concatenate([Xs, Xr], axis=0)
-        y = np.concatenate([ys, np.ones(len(Xr),dtype=np.float32)], axis=0)
-        final = train_fold(X, y, device, epochs=30)
-        torch.save({"model_state":{k:v.detach().cpu() for k,v in final.state_dict().items()},
-                    "in_ch":MODEL_CH, "channels":CHANNELS}, OUT_PT)
-        log(f"saved final model → {OUT_PT}")
+    # ALWAYS train + save the final deployment model on synthetic + ALL real
+    # positives (a K_ENS ensemble for robust inference). Previously gated on
+    # ≥80% recall, but we want the model at the current best config for
+    # inference regardless — the LOO number tells us its completeness.
+    log(f"training FINAL deployment ensemble (K={K_ENS}) on synthetic + all {len(pos_sids)} real positives")
+    Xr = np.concatenate([real_aug[s] for s in pos_sids], axis=0)
+    X = np.concatenate([Xs, Xr], axis=0)
+    y = np.concatenate([ys, np.ones(len(Xr),dtype=np.float32)], axis=0)
+    states = []
+    for k in range(K_ENS):
+        fm = train_fold(X, y, device, seed=2000+k)
+        states.append({kk: v.detach().cpu() for kk, v in fm.state_dict().items()})
+    torch.save({"ensemble_states": states, "in_ch": MODEL_CH, "channels": CHANNELS,
+                "loo_rec05": rec05, "loo_n": len(scores)}, OUT_PT)
+    log(f"saved final {K_ENS}-model ensemble → {OUT_PT}  (LOO {rec05}/{len(scores)} @P>=0.5)")
     OUT_REPORT.write_text("\n".join(lines)+"\n")
     return rec05, len(scores)
 
