@@ -578,6 +578,19 @@ that runs, the consolidator-side check is the workaround.
   trials, caching cutouts on the external disk (/Volumes/My Book) is allowed.
 * The previous-gen CNN in `/Users/suzuki/github/projects_jwst/programs_cosmos/`
   (`train_supernova_cnn.py`) performed BETTER than v04/v05 — study it.
+* **ON-HOST SNe / DAO absence ≠ SN absence (user 2026-06-01, BINDING).**
+  A supernova can occur ON TOP OF or blended with its host galaxy, where DAO
+  records NO separate point source (its peak merges into the galaxy light, or
+  DAO centroids on the nucleus). Consequences:
+    1. NEVER require a DAO detection to admit a position as a SN candidate.
+       (The JWST 30 mas DAO-match gate in 52_step3 dropped 273K/35% of real
+       catalog sources — incl. SN hosts 468896/19931/39020 — see §8.)
+    2. The CNN MUST be trained to find on-host SNe (transient blended with the
+       host, no clean isolated point source) — the hardest population and the
+       one that matters most. Injection training must make ON-HOST injection
+       central (SN added onto the galaxy core), not incidental.
+    3. The candidate pool must keep ALL catalog sources so on-host SNe are not
+       pre-filtered before the CNN sees them.
 
 ### 7.1 Guiding papers
 * **TransiNet** (Sedaghat & Mahabal 2018, MNRAS 476, 5365; arXiv:1710.01422):
@@ -653,3 +666,49 @@ retrain v06 on the larger master_sn_list.csv.
 ### 7.5 Next step (pending)
 Retrain v06 on the 52-SN master list (48 JWST positives vs the old 13) — this
 directly attacks the data-starvation wall that capped LOO recovery at 8/17.
+
+----
+
+## 8. UPSTREAM CATALOG COMPLETENESS BUG (found 2026-06-01) — JWST DAO gate
+
+**Symptom:** 3 of the 56 master SNe (468896, 19931, 39020) have NO source in
+`fits_lookup_v03` within 2″, yet are well inside the JWST+HST footprint.
+
+**Trace (level by level):**
+- Raw `COSMOSWeb_mastercatalog_v1.1.fits` (784,016 src): all 3 PRESENT at
+  correct RA/Dec.
+- `master_or_catalog_v03`: all 3 ABSENT.
+- → dropped in `programs_star/52_step3_catalog_match_v03.py`.
+
+**Root cause:** step-3 builds the JWST table from `cw_id[matched_cat_ids]`,
+where `matched_cat_ids` = catalog sources with a DAO peak within
+**`JWST_PIX_AS = 0.030″ = 30 mas`** (ONE JWST pixel!) in ≥1 band. DAO
+confirmation is thus a SURVIVAL GATE. Faint / blended / ON-HOST sources
+(exactly where SNe live) have their DAO peak land >30 mas from the SExtractor
+centroid (or no peak at all) → the catalog ID never enters `matched_cat_ids`
+→ the source is silently dropped.
+
+**Impact (quantified):** of 768,840 raw catalog sources in the JWST F115W
+footprint, only 495,532 survived to fits_lookup — **273,308 (35.5%) dropped**.
+This is a major completeness hole in the SN search pool, not just a validation
+nuisance. It directly conflicts with §7.0 "DAO absence ≠ SN absence".
+
+**Fix (user-approved 2026-06-01): keep ALL raw catalog sources.**
+In `52_step3_catalog_match_v03.py`, build the JWST `out` table from every
+COSMOS-Web source inside the JWST footprint (not just `matched_cat_ids`). DAO
+photometry becomes an ANNOTATION (attached where matched within 30 mas, NaN
+otherwise), NOT a survival gate. `cat_mag/cat_snr/cat_flag_star/...` come from
+the raw catalog for all kept IDs. JWST table grows 495K → ~769K. Then re-run
+step-3 → master → fits_lookup, then re-derive the v07 inference pool.
+Versioning of the rebuilt catalog: NOT yet decided by the user.
+
+### Pipeline / paths (for the rebuild)
+- Raw catalog: `/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits`
+  (id, ra, dec, flag_star, flag_blend, fwhm, sersic, axratio, radius_sersic,
+   mag_auto_<band>, snr_<band> for F115/F150/F277/F444).
+- Step-3: `programs_star/52_step3_catalog_match_v03.py` (JWST section ~L185-275).
+- DAO per-band: `csvfiles_star/dao/dao_<band>.parquet`.
+- Master aggregator: `programs_star/59_master_or_catalog_v03.py`.
+- fits_lookup builder: `programs_webpage/make_fits_lookup_v03.py`.
+- Tile footprint resolver (no FITS I/O): `programs_webpage/tile_lookup.py`
+  + `csvfiles_sn/tile_footprints.parquet` (built by build_tile_footprints.py).
