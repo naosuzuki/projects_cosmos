@@ -277,13 +277,22 @@ class SNCNN(nn.Module):
             nn.Conv2d(in_ch,16,3,padding=1), nn.BatchNorm2d(16), nn.ReLU(), nn.MaxPool2d(2),
             nn.Conv2d(16,32,3,padding=1),    nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
             nn.Conv2d(32,64,3,padding=1),    nn.BatchNorm2d(64), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(64,128,3,padding=1),   nn.BatchNorm2d(128),nn.ReLU(), nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(64,128,3,padding=1),   nn.BatchNorm2d(128),nn.ReLU(),
         )
+        # iter-5: concat AVG + MAX global pooling. AdaptiveAvgPool alone
+        # averaged the feature map → diluted a CENTERED compact point source
+        # against the extended host, leaving real SNe under-confident (iter-3:
+        # 40/56 at P>=0.3 but only 26 at P>=0.5). MaxPool preserves the
+        # transient's peak activation; avg keeps host context. Concat → 256.
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        self.maxpool = nn.AdaptiveMaxPool2d(1)
         self.classifier = nn.Sequential(
-            nn.Flatten(), nn.Linear(128,64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64,1),
+            nn.Flatten(), nn.Linear(256,64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64,1),
         )
     def forward(self, x):
-        return self.classifier(self.features(x)).squeeze(1)
+        f = self.features(x)
+        cat = torch.cat([self.avgpool(f), self.maxpool(f)], dim=1)
+        return self.classifier(cat).squeeze(1)
 
 
 def augment(stack, rng):
@@ -585,7 +594,7 @@ def augment_real(stack, rng, n_aug):
     return out
 
 
-def train_fold(X, y, device, epochs=26, batch=256, lr=1e-3, seed=0):
+def train_fold(X, y, device, epochs=18, batch=256, lr=1e-3, seed=0):
     # iter-4: 18→26 epochs (diff channels carry real signal, train longer) +
     # pos_weight>1 so faint-but-real SNe are pushed firmly over 0.5 (iter-3 had
     # 40/56 recovered at P>=0.3 but only 26 at P>=0.5 — a calibration gap, not
@@ -593,7 +602,7 @@ def train_fold(X, y, device, epochs=26, batch=256, lr=1e-3, seed=0):
     torch.manual_seed(seed)
     model = SNCNN(in_ch=MODEL_CH).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    crit = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([2.0], device=device))
+    crit = nn.BCEWithLogitsLoss()
     X = to_input(X)   # σ-units → [0,1] asinh map (CNN-input boundary)
     X_t = torch.tensor(X, device=device); y_t = torch.tensor(y, device=device)
     n = X_t.shape[0]
@@ -607,7 +616,7 @@ def train_fold(X, y, device, epochs=26, batch=256, lr=1e-3, seed=0):
     return model
 
 
-def ensemble_score(X, y, device, sn_tensor, K=5, epochs=26):
+def ensemble_score(X, y, device, sn_tensor, K=5, epochs=18):
     """Train K models (different inits/batch orders) and return the MEAN
     sigmoid score for sn_tensor. Averaging kills the per-SN weight-induced
     variance seen in iter-2 (SNe swinging 1.0↔0.0001 between configs);
