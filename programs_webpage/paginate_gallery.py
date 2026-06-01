@@ -33,6 +33,11 @@ NOTE = {
             "<b>v04 = difference imaging.</b> HST F814W (2005-2008) subtracted from "
             "each modern-epoch band; a positive residual = transient flux absent in "
             "the HST epoch. Validated on known SNe (residual SNR 16-90)."),
+    "v03": ("#fee", "#d00",
+            "<b>v03 = first principled CNN pipeline.</b> Per-survey CNN with corrected "
+            "labels (discovery-telescope only). Only 1/17 known SNe recovered in-sky; "
+            "the CNN learns 'compact source on a host' rather than the transient "
+            "signature. See v04 (difference imaging) for the validated list."),
 }
 
 
@@ -50,7 +55,13 @@ def main():
     if "--top" in args: top = int(args[args.index("--top")+1])
 
     cand_csv = CSV_DIR / f"tbl_sn_candidates_{version}.csv"
-    out_dir = HTML_BASE / version / "polished_top200"
+    # Auto-detect existing gallery dir (v05/v04 use polished_top200, v03 uses polished_top100)
+    for cand_dir in ("polished_top200", "polished_top100"):
+        if (HTML_BASE / version / cand_dir).exists():
+            out_dir = HTML_BASE / version / cand_dir
+            break
+    else:
+        out_dir = HTML_BASE / version / "polished_top200"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with cand_csv.open() as f:
