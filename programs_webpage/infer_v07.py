@@ -47,7 +47,6 @@ def main():
 
     lk = pq.read_table(LOOK).to_pandas()
     full = lk[(lk["in_hst"]) & (lk["in_jwst"])].reset_index(drop=True)
-    log(f"scoring {len(full):,} HST+JWST-coverage sources")
     resolver = TileResolver()
 
     # group by JWST tile (the limiting survey); each group shares 4 JWST bands
@@ -55,6 +54,22 @@ def main():
     for i, r in full.iterrows():
         by_jtile[str(r["tile_jwst"])].append(
             (str(r["primary_id"]), float(r["ra"]), float(r["dec"]), str(r["tile_hst"])))
+
+    # ALSO add the 56 master-SN positions explicitly (id prefixed "KNOWN_"), so
+    # all known SNe are scored even when offset from the nearest catalog row
+    # (3 of 56 — 468896/19931/39020 — sit 2.4-4.6" from any 495K row). Resolve
+    # each SN's JWST+HST tile by footprint geometry. This makes the scored set
+    # a guaranteed superset of all 56, enabling complete purity/recovery checks.
+    import csv as _csv
+    n_known = 0
+    for r in _csv.DictReader(open(CSV_DIR / "lookup_master56.csv")):
+        sra, sdec = float(r["sn_ra"]), float(r["sn_dec"])
+        jt, _ = resolver.resolve("jwst", "F115W", sra, sdec)
+        ht, _ = resolver.resolve("hst", "F814W", sra, sdec)
+        if jt is None or ht is None:
+            log(f"  [warn] known SN {r['id']} not in JWST+HST footprint, skip"); continue
+        by_jtile[jt].append((f"KNOWN_{r['id']}", sra, sdec, ht)); n_known += 1
+    log(f"scoring {len(full):,} catalog sources + {n_known} known-SN positions")
     log(f"{len(by_jtile)} JWST tiles")
 
     jbands = ["F115W","F150W","F277W","F444W"]
