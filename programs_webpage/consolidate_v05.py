@@ -334,14 +334,22 @@ def main():
         if not morph_snrs: n_morph += 1; continue
         # PATCH 16 (user 2026-05-28, after old #60/#61 F277W-only image
         # defects): JWST/NISP require ≥2 bands passing G1-G4 + snr ≥ 5.
-        # Single-band JWST detection is almost certainly an image defect
-        # (CR cluster, hot pixel, snowball, IPC artifact) — real SNe leave
-        # the same PSF in every JWST band simultaneously (scaled by SED).
+        # Single-band JWST detection is almost certainly an image defect.
         if det_name in ("JWST","EUCLID-NISP","EUCLID-VIS+NISP"):
             ms = sorted(morph_snrs, reverse=True)
             if len(ms) < 2:
                 n_cross += 1; continue   # HARD-REJECT single-band (patch 16)
             if ms[0] > 10*ms[1]: n_cross += 1; continue
+        # PATCH 17 (user 2026-05-28, after #17 = F277W+F444W only): for JWST,
+        # require detection at BOTH ends of the spectrum. F277W+F444W are
+        # both long-wavelength bands (same "color"); without F115W/F150W,
+        # the source SED is red-rising — high-z dropout or asteroid, not a
+        # SN. Real SNe at z<3 are visible across all 4 JWST bands.
+        if det_name == "JWST":
+            short_ok = any(float(SNR[b][i]) >= 5.0 for b in ("F115W","F150W"))
+            long_ok  = any(float(SNR[b][i]) >= 5.0 for b in ("F277W","F444W"))
+            if not (short_ok and long_ok):
+                n_cross += 1; continue
         if best_snr < 5.0: n_snr += 1; continue
         if best_mag <= 0 or best_mag < MAG_FLOOR: n_mag += 1; continue
         # HST-depth cap: reject if detection-band mag is fainter than HST can
