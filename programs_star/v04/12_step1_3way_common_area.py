@@ -165,12 +165,12 @@ def main():
         'HST_F814W',
         lambda: union_mission_filter('HST_F814W_', gwcs, gshape),
         gwcs, gshape,
-        '1″ global HST F814W union of all 10 ACS tiles')
+        '1 arcsec global HST F814W union of all 10 ACS tiles')
     VIS_mask = load_or_build_mission_mask(
         'Euclid_VIS',
         lambda: union_mission_filter('Euclid_VIS_', gwcs, gshape),
         gwcs, gshape,
-        '1″ global Euclid VIS union of all MER tiles')
+        '1 arcsec global Euclid VIS union of all MER tiles')
     # JWST = intersection of all 4 NIRCam bands
     jwst_bands = []
     for flt in ('F115W', 'F150W', 'F277W', 'F444W'):
@@ -178,13 +178,13 @@ def main():
             f'JWST_{flt}',
             lambda flt=flt: union_mission_filter(f'JWST_{flt}_', gwcs, gshape),
             gwcs, gshape,
-            f'1″ global JWST NIRCam {flt} union')
+            f'1 arcsec global JWST NIRCam {flt} union')
         jwst_bands.append(m)
     JWST_mask = jwst_bands[0].copy()
     for m in jwst_bands[1:]:
         JWST_mask &= m
     write_mask_fits(JWST_mask, gwcs, GCOV / 'JWST_4band_intersect_1arcsec.fits.gz',
-                    '1″ global JWST 4-band intersection (F115∩F150∩F277∩F444)')
+                    '1 arcsec global JWST 4-band intersection F115/F150/F277/F444')
 
     # ── 3-way intersection: HST ∩ JWST(4-band) ∩ VIS ───────────────────
     three_way = HST_mask & JWST_mask & VIS_mask
@@ -197,7 +197,7 @@ def main():
 
     three_way_path = V04 / 'common_area_3way_1arcsec.fits.gz'
     write_mask_fits(three_way, gwcs, three_way_path,
-                    '3-way HST INTERSECT JWST INTERSECT EuclidVIS common-area')
+                    '3-way HST INTERSECT JWST INTERSECT EuclidVIS common area mask')
     print(f'[save] {three_way_path.name}')
 
     # ── EDGE EXTRACTION (the persistent "edges" record) ────────────────

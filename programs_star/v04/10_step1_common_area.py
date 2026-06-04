@@ -311,10 +311,26 @@ def build_coverage_mask(rec: TileRecord) -> np.ndarray:
     return eroded.astype(np.uint8), wcs
 
 
-def write_mask(mask: np.ndarray, wcs: WCS, dest: Path):
-    """Write the binary mask as a gzipped FITS with the source WCS."""
+def write_mask(mask: np.ndarray, wcs: WCS, dest: Path,
+               rec: TileRecord | None = None):
+    """Write the binary mask as a gzipped FITS with the source WCS.
+
+    When `rec` is provided we also embed the pre/post-erosion pixel
+    counts in the header so a later --reuse pass can rehydrate the
+    lookup table's n_pix_observed / n_pix_after_erosion / n_pix_total
+    columns without reopening the (much larger) source mosaic.
+    """
     hdu = fits.PrimaryHDU(data=mask, header=wcs.to_header())
     hdu.header['BUNIT'] = 'coverage'
+    if rec is not None:
+        hdu.header['NPXTOT']  = (int(rec.n_pix_total),
+                                 'image pixel count')
+        hdu.header['NPXOBS']  = (int(rec.n_pix_observed),
+                                 'pixels passing sci/wht/err criterion')
+        hdu.header['NPXEROD'] = (int(rec.n_pix_after_erosion),
+                                 'pixels after 10-px erosion (= sum of mask)')
+        hdu.header['PIXSMAS'] = (float(rec.pixscale_mas),
+                                 'native pixel scale [mas]')
     hdu.header['COMMENT'] = '1 = pixel observed and >=10 px from edge'
     # astropy writes .fits.gz automatically if the extension matches
     hdu.writeto(dest, overwrite=True)
@@ -399,9 +415,14 @@ def main():
                 with fits.open(dest, memmap=True) as h:
                     mask = np.asarray(h[0].data)
                     wcs  = WCS(h[0].header)
+                    hdr  = h[0].header
                 rec.naxis1, rec.naxis2 = mask.shape[1], mask.shape[0]
-                rec.n_pix_total = int(mask.size)
-                rec.n_pix_after_erosion = int(mask.sum())
+                # Prefer header-stored counts (written by build path); fall
+                # back to mask.sum() for tiles built before the telemetry fix.
+                rec.n_pix_total         = int(hdr.get('NPXTOT',  mask.size))
+                rec.n_pix_after_erosion = int(hdr.get('NPXEROD', mask.sum()))
+                rec.n_pix_observed      = int(hdr.get('NPXOBS',
+                                                       rec.n_pix_after_erosion))
                 # bounding box + corners
                 ny, nx = mask.shape
                 corner_px = np.array([[0, 0], [nx-1, 0], [nx-1, ny-1], [0, ny-1]])
@@ -410,8 +431,9 @@ def main():
                 rec.corners_dec = [float(x) for x in dec_c]
                 rec.ra_min, rec.ra_max  = float(np.min(ra_c)), float(np.max(ra_c))
                 rec.dec_min, rec.dec_max = float(np.min(dec_c)), float(np.max(dec_c))
-                s = np.abs(wcs.pixel_scale_matrix)
-                rec.pixscale_mas = float(np.sqrt(s[0,0]**2 + s[1,0]**2) * 3600e3)
+                rec.pixscale_mas = float(hdr.get('PIXSMAS',
+                    np.sqrt(np.abs(wcs.pixel_scale_matrix)[0,0]**2 +
+                            np.abs(wcs.pixel_scale_matrix)[1,0]**2) * 3600e3))
                 print(f'  [{i:3d}/{len(records)}] reuse {dest.name}  '
                       f'{rec.n_pix_after_erosion/1e6:.1f}M px covered')
                 continue
@@ -421,7 +443,7 @@ def main():
         try:
             t_tile = time.time()
             mask, wcs = build_coverage_mask(rec)
-            write_mask(mask, wcs, dest)
+            write_mask(mask, wcs, dest, rec)
             print(f'  [{i:3d}/{len(records)}] {rec.mission:6s} {rec.filter:6s} '
                   f'{rec.tile_id:8s}  '
                   f'{rec.naxis1}×{rec.naxis2} @ {rec.pixscale_mas:5.1f} mas  '
