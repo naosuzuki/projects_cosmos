@@ -1,0 +1,37 @@
+<!doctype html><html><head>
+<title>Star orphans — v05 index</title><style>
+body{font-family:serif;margin:0;padding:0;background:#fafafa}
+.header{position:sticky;top:0;background:white;border-bottom:1px solid #ddd;padding:8px;z-index:10}
+.pagination{display:inline-block}
+.pagination a{color:black;float:left;padding:6px 12px;text-decoration:none;
+  transition:background-color .2s;border:1px solid #ccc;margin:1px}
+.pagination a.active{background-color:#4CAF50;color:white}
+.pagination a:hover:not(.active){background-color:#ddd}
+.row{padding:4px 8px;border-bottom:1px solid #eee}
+.row h3{margin:6px 0 4px 0;font-size:14px;color:#222}
+.imgs img{width:18%;margin:0 0.5%;vertical-align:top}
+.imgs span{display:inline-block;width:18%;margin:0 0.5%;text-align:center;
+  vertical-align:top;padding:60px 0;color:#888;font-style:italic;background:#f0f0f0}
+</style></head><body>
+<div class='header'><h2>Star orphans v05 — strict 3-mission rule + JWST chip-gap check</h2></div>
+<p style='padding:14px'>
+<b>Rules:</b>
+<ol>
+  <li>Must have a JWST F115W detection (JWST ID is the canonical identifier). No JWST → disqualified.</li>
+  <li>Must have HST F814W and Euclid VIS cross-matches.</li>
+  <li>JWST pixel coverage ≥ 80% in 5×5 around the position (removes chip-gap detections).</li>
+  <li>HST F814W image extent: FWHM ≤ 0.214″ AND ellip ≤ 0.3.</li>
+  <li>Catalog galaxy veto (Euclid PHZ, HST mu_class, CW flag_star, COSMOS2020 lp_type).</li>
+</ol>
+<b>Source list:</b> proper_motion_v01 → n_epochs == 3 → all vetos applied → sorted by total PM.
+Output saved at <code>csvfiles_star/orphans_v10.parquet</code> (<b>336</b> rows),
+top 336 shown in the webpage.
+</p>
+<ul style='padding:14px'>
+  <li><a href='star_index0001.html'>Star orphan candidates (336, sorted by |μ|)</a></li>
+</ul>
+<p style='padding:14px;font-size:12px;color:#666'>
+Each thumbnail carries a simple red crosshair at the catalog position.
+Earlier versions: <a href='../v01/'>v01</a>, <a href='../v02/'>v02</a>,
+<a href='../v03/'>v03</a>, <a href='../v04/'>v04</a> (now superseded).</p>
+</body></html>
