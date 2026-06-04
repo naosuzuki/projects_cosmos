@@ -1,0 +1,98 @@
+# projects_cosmos — what NOT to commit
+#
+# This repo holds code + small derived catalogs.  Bulk raw / intermediate
+# data lives on /Volumes/exdisk1 and is gitignored here.  When tracking
+# large artefacts, prefer parquet (canonical) over CSV (sidecar).
+
+# ─── Editor / OS ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.DS_Store
+*.swp
+*~
+
+# ─── Big intermediate data dumps (>50 MB each, regenerable) ────────────
+# csvfiles_star v01/v02/v03 carry tens of GB of intermediate
+# cat_matched / cross / refined / pairs / orphans tables.  These are
+# regenerable from code + the per-tile FITS, so we don't track them.
+csvfiles_star/v01/dao/
+csvfiles_star/v01/inputs/
+csvfiles_star/v01/inputs_with_coverage/
+csvfiles_star/v01/footprints/
+csvfiles_star/v01/sed_filters/
+csvfiles_star/v01/cat_matched_*
+csvfiles_star/v01/cross_*
+csvfiles_star/v01/refined_*
+csvfiles_star/v01/pairs_*
+csvfiles_star/v01/orphans*
+csvfiles_star/v01/gaia_*
+csvfiles_star/v01/good_stars_*
+csvfiles_star/v01/saturated_stars_*
+csvfiles_star/v01/ps1_cosmos*
+csvfiles_star/v01/sdss_cosmos*
+csvfiles_star/v01/desi_cosmos_box.*
+csvfiles_star/v01/master_stars_4way*
+csvfiles_star/v01/master_or_catalog_v01.parquet
+csvfiles_star/v01/clean_stars_v01.*
+csvfiles_star/v01/proper_motion_v01.*
+csvfiles_star/v01/star_master_v01.*
+csvfiles_star/v01/triple_morphology_stars.*
+
+csvfiles_star/v02/cat_matched_*
+csvfiles_star/v02/cross_*
+csvfiles_star/v02/refined_*
+csvfiles_star/v02/master_or_catalog_v02.parquet
+
+csvfiles_star/v03/cat_matched_*
+csvfiles_star/v03/cross_*
+csvfiles_star/v03/refined_*
+csvfiles_star/v03/master_or_catalog_v03.parquet
+
+csvfiles_star/v04/cat_matched_*
+csvfiles_star/v04/_step1_full.log
+csvfiles_star/v04/_*.log
+
+# Coverage masks ARE tracked (small, ~600 KB gzipped each).
+# Tile lookup IS tracked.
+# Per-pipeline scratch files starting with _ are not.
+
+# ─── SN-search side products ───────────────────────────────────────────
+csvfiles_sn/_partial/
+csvfiles_sn/*.pt
+csvfiles_sn/*.npz
+csvfiles_sn/sn_candidates_v01.parquet
+csvfiles_sn/sn_candidates_v03.parquet
+csvfiles_sn/sn_candidates_v07_scored.parquet
+csvfiles_sn/run_*_status.log
+csvfiles_sn/train_*_report.txt
+
+# ─── HTML browse output: raw pre-rendering caches ──────────────────────
+# Polished pages + their thumbnails ARE tracked.  The _raw/ intermediate
+# image caches are regenerable and skipped.
+htmls/v01/sn_search/v03/polished_top100/_raw/
+htmls/v01/sn_search/v04/polished_top200/_raw/
+htmls/v01/sn_search/v05/polished_top200/_raw/
+htmls/v01/sn_search/v06/_raw/
+htmls/v01/sn_search/v07/_raw/
+
+# Aggressive: very large htmls/v01/sn_search/vNN/ subdirs whose contents
+# weren't tracked before the reorg get re-evaluated by the user before
+# being staged.
+htmls/v01/sn_search/v04/
+htmls/v01/sn_search/v05/
+htmls/v01/sn_search/v06/
+htmls/v01/sn_search/v07/
+
+# ─── Per-session scratch ───────────────────────────────────────────────
+*.log
+!_aria2.log              # download wrappers keep this for resume
+_aria2_urls.txt
+_python.log
+_progress.py
+_progress_state.json
+
+# ─── Misc ──────────────────────────────────────────────────────────────
+.env
+.venv/
+node_modules/
