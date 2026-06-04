@@ -179,15 +179,26 @@ if __name__ == '__main__':
 
     print('\n--- Footprint smoke test ---')
     if FOOTPRINT_WKT.exists():
+        poly = footprint_polygon()
+        n_pieces = len(poly.geoms) if poly.geom_type == 'MultiPolygon' else 1
         print(f'footprint WKT: {FOOTPRINT_WKT}  '
-              f'{FOOTPRINT_WKT.stat().st_size/1024:.0f} KB')
-        sample = np.array([(150.10, 2.20),  # COSMOS centre
-                           (150.50, 2.20),  # off-centre east
-                           (150.00, 2.00),  # off-centre south-west
-                           (149.50, 2.20)]) # well outside
+              f'{FOOTPRINT_WKT.stat().st_size/1024:.0f} KB, '
+              f'{n_pieces} polygon(s), area = {poly.area:.4f} deg²')
+        # Pick a guaranteed-inside point (centroid of the largest sub-polygon)
+        if n_pieces > 1:
+            largest = max(poly.geoms, key=lambda p: p.area)
+        else:
+            largest = poly
+        cen = largest.centroid
+        sample = np.array([(150.10,  2.20),       # nominal COSMOS centre
+                           (cen.x,   cen.y),       # centroid of largest piece
+                           (149.50,  2.20),       # outside (west)
+                           (150.50,  2.85)])      # outside (north)
         ras, decs = sample.T
         ins = in_v04_footprint(ras, decs)
-        for (r, d), b in zip(sample, ins):
-            print(f'  in_v04_footprint({r:6.2f}, {d:5.2f}) -> {bool(b)}')
+        labels = ['cosmos centre', 'largest-piece centroid',
+                  'outside (west)', 'outside (north)']
+        for (r, d), b, lbl in zip(sample, ins, labels):
+            print(f'  in_v04_footprint({r:8.4f}, {d:6.4f}) -> {bool(b):5}  ({lbl})')
     else:
         print(f'(footprint WKT not built yet at {FOOTPRINT_WKT})')
