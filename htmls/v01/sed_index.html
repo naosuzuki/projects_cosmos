@@ -1,0 +1,197 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Blackbody SED fits — version index</title>
+<style>
+body { font-family: serif; margin: 0; padding: 0; background: #fafafa; }
+.wrap { max-width: 980px; margin: 0 auto; padding: 24px; }
+h1 { margin-bottom: 4px; }
+.subtitle { color: #666; font-style: italic; margin-bottom: 24px; }
+.back { font-size: 13px; color: #666; }
+.ver { padding: 14px 0; border-bottom: 1px solid #ddd; }
+.ver-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ver-head a.label { text-decoration: none; font-weight: bold; color: #1a5; font-size: 18px; }
+.ver-head a.label:hover { text-decoration: underline; }
+.ver-head a.summary { font-size: 12px; color: #888; text-decoration: none; }
+.ver-head a.summary:hover { color: #1a5; }
+.tag { display: inline-block; padding: 1px 6px; font-size: 11px;
+       background: #eef; border-radius: 3px; color: #336; }
+.tag.fit { background: #efe; color: #363; }
+.tag.test { background: #fee; color: #933; }
+.tag.held { background: #ffe; color: #663; }
+.meta { color: #666; font-size: 13px; margin-top: 4px; }
+p { margin: 6px 0; line-height: 1.45; font-size: 14px; }
+table { border-collapse: collapse; font-size: 12px; margin: 6px 0; }
+table td, table th { padding: 2px 8px; text-align: right; border-bottom: 1px solid #eee; }
+table th { background: #f3f3f3; }
+table td:first-child, table th:first-child { text-align: left; }
+.note { font-size: 12px; color: #888; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="back"><a href="../index.html">&larr; all decks</a></p>
+<h1>Blackbody SED cross-calibration</h1>
+<p class="subtitle">Nine versions of the multi-band blackbody SED fit on the COSMOS
+clean star sample.  Each version differs in which bands constrain the fit and
+which are predicted-and-tested.  Click a version name to open its paginated
+SED-card webform; click "summary plot" to open just the per-band offset figure.</p>
+
+<p>Sample for all versions: <b>6,007 clean stars</b> from the 4-way HST&cap;JWST&cap;Euclid
+intersection with SNR&nbsp;&gt;&nbsp;10 in all 9 HST/JWST/Euclid bands.  In v03 onward
+the <b>274 AGN/QSO are excluded from the calibration statistics</b> and the
+main star webform, but their photometry is kept in a separate
+<code>index_agn.html</code> page.  AB magnitudes throughout; blackbody fit by 1-D
+&chi;<sup>2</sup> scan in <i>T</i> with the flux normalisation solved per-<i>T</i>.</p>
+
+<!-- v01 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v01/index.html">v01</a>
+    <span class="tag fit">fit: HST + JWST (5 bands)</span>
+    <span class="tag test">test: Euclid VIS/Y/J/H</span>
+    <a class="summary" href="sed_v01/euclid_offset_summary.png">[summary plot]</a>
+  </div>
+  <p>First-order Euclid offset test.  Fit a blackbody to HST F814W + JWST F115/F150/F277/F444W
+  only, then predict the four Euclid bands and measure &Delta;.
+  <b>Result:</b> VIS&nbsp;+0.16, Y&nbsp;&minus;0.09, J&nbsp;&minus;0.13, H&nbsp;&minus;0.18&nbsp;mag.</p>
+  <p class="note">Anchor-only test — no other facilities yet, no AGN cut.</p>
+</div>
+
+<!-- v02 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v02/index.html">v02</a>
+    <span class="tag fit">fit: COSMOS-Web HST + JWST (5)</span>
+    <span class="tag test">test: CFHT u, HSC, UltraVISTA, IRAC, MIRI (15)</span>
+    <a class="summary" href="sed_v02/band_offset_summary.png">[summary plot]</a>
+  </div>
+  <p>Multi-telescope extension using <b>COSMOS-Web's own</b> HST F814W + JWST flux_model as anchor.
+  Predict every other facility recorded in the COSMOS-Web mastercatalog and measure &Delta;
+  per band.  Validity filter rejects flux_err sentinels and per-source fill values.</p>
+  <p class="note">Anchor differs from our Step-3 photometry; the optical "blue trend" here is
+  partly an anchor effect (see v03).</p>
+</div>
+
+<!-- v03 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v03/index.html">v03</a>
+    <span class="tag fit">fit: OUR HST + JWST (5)</span>
+    <span class="tag test">test: Euclid + CFHT + HSC + IRAC + MIRI (15)</span>
+    <a class="summary" href="sed_v03/band_offset_summary.png">[summary plot]</a>
+    <a class="summary" href="sed_v03/index_agn.html">[AGN page]</a>
+  </div>
+  <p>Same as v01 but with the multi-facility test set added (our Euclid + COSMOS-Web CFHT/HSC/IRAC/MIRI).
+  Anchored on <b>our</b> Step-3 HST F814W + JWST NIRCam.  AGN/QSO excluded from offsets.</p>
+  <p class="note">Optical HSC offsets snap to &asymp;0 vs v02 &rarr; our HST+JWST photometry
+  differs slightly from COSMOS-Web's anchor.</p>
+</div>
+
+<!-- v04 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v04/index.html">v04</a>
+    <span class="tag fit">fit: ALL 20 bands (democratic, no anchor)</span>
+    <a class="summary" href="sed_v04/band_offset_summary.png">[summary plot]</a>
+    <a class="summary" href="sed_v04/index_agn.html">[AGN page]</a>
+  </div>
+  <p>Global blackbody fit to every available band per star
+  (HST + JWST + Euclid + CFHT + HSC + IRAC + MIRI = 20).  No band privileged.
+  Per-band &Delta; shows each facility's deviation from the all-facility consensus.</p>
+  <p><b>Bottom line:</b> almost all bands within &plusmn;0.15&nbsp;mag of the global continuum;
+  the coherent &asymp;&plusmn;0.15&nbsp;mag wavelength ripple is the blackbody-vs-real-star
+  shape, not calibration error.</p>
+</div>
+
+<!-- v05 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v05/index.html">v05</a>
+    <span class="tag fit">fit: v04 bands minus Euclid (16)</span>
+    <span class="tag held">held out: Euclid VIS / Y / J / H</span>
+    <a class="summary" href="sed_v05/band_offset_summary.png">[summary plot]</a>
+    <a class="summary" href="sed_v05/index_agn.html">[AGN page]</a>
+  </div>
+  <p>Like v04 but the four Euclid bands are <b>held out of the fit</b>.  Blackbody anchored on
+  every other facility, then Euclid is predicted from the consensus continuum and tested.</p>
+  <table>
+    <tr><th>Euclid band</th><th>median &Delta;</th><th>nearest facility</th></tr>
+    <tr><td>VIS (0.70&nbsp;&mu;m)</td><td>+0.21</td><td>F814W +0.17</td></tr>
+    <tr><td>Y (1.07&nbsp;&mu;m)</td><td>&minus;0.05</td><td>HSC y &minus;0.12</td></tr>
+    <tr><td>J (1.35&nbsp;&mu;m)</td><td>&minus;0.12</td><td>F150W &minus;0.13</td></tr>
+    <tr><td>H (1.75&nbsp;&mu;m)</td><td>&minus;0.17</td><td>F150W &minus;0.13</td></tr>
+  </table>
+  <p class="note">Euclid NISP Y/J/H tracks neighbouring facilities; VIS shares its &plusmn;0.2&nbsp;mag offset with HST F814W (broad-band effect).</p>
+</div>
+
+<!-- v06 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v06/index.html">v06</a>
+    <span class="tag fit">fit: v04 + SDSS u/g/r/i/z (25)</span>
+    <a class="summary" href="sed_v06/band_offset_summary.png">[summary plot]</a>
+    <a class="summary" href="sed_v06/index_agn.html">[AGN page]</a>
+  </div>
+  <p>v04 extended with SDSS DR16 PSF magnitudes.  Of the 6,007 stars, 588&ndash;1,098 have
+  SDSS detections per band (depth-limited).  SDSS bands are fit democratically with the others.</p>
+  <p class="note">New constraints: SDSS u &minus;0.17, g &minus;0.09, r&nbsp;0.00, i &minus;0.04, z &minus;0.24.
+  The SDSS&nbsp;z offset is consistent with the known PS1/SDSS&nbsp;z step vs HSC.</p>
+</div>
+
+<!-- v07 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v07/index.html">v07</a>
+    <span class="tag fit">fit: v04 + PS1 g/r/i/z/y (25)</span>
+    <a class="summary" href="sed_v07/band_offset_summary.png">[summary plot]</a>
+    <a class="summary" href="sed_v07/index_agn.html">[AGN page]</a>
+  </div>
+  <p>v04 extended with Pan-STARRS DR1 mean PSF magnitudes (VizieR II/349).  398&ndash;1,053 PS1 detections per band.</p>
+  <p class="note">PS1 r &minus;0.07, i &minus;0.13, z &minus;0.28, <b>y &minus;0.52</b>.
+  PS1&nbsp;y is the standout (wide PSF, partial COSMOS coverage, well-known soft calibration vs other surveys).</p>
+</div>
+
+<!-- v08 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v08/index.html">v08</a>
+    <span class="tag fit">fit: v04 + SDSS + PS1 — ALL 30 BANDS</span>
+    <a class="summary" href="sed_v08/band_offset_summary.png">[summary plot]</a>
+    <a class="summary" href="sed_v08/index_agn.html">[AGN page]</a>
+  </div>
+  <p>All ten facilities at once: HST + JWST + Euclid + CFHT + HSC + IRAC + MIRI + SDSS + PS1.
+  The fullest democratic blackbody fit in the series.</p>
+  <p class="note">Optical SDSS/PS1 g-band cluster around &minus;0.1; HSC/Euclid sit slightly above zero;
+  IRAC ch1/ch2 and MIRI agree to &lt;0.15 mag &mdash; cross-facility consistency at the &asymp;0.15&nbsp;mag level
+  is preserved even with 30 bands in the fit.</p>
+</div>
+
+<!-- v09 -->
+<div class="ver">
+  <div class="ver-head">
+    <a class="label" href="sed_v09/index.html">v09</a>
+    <span class="tag fit">fit: v08 minus Euclid (26)</span>
+    <span class="tag held">held out: Euclid VIS / Y / J / H</span>
+    <a class="summary" href="sed_v09/band_offset_summary.png">[summary plot]</a>
+    <a class="summary" href="sed_v09/index_agn.html">[AGN page]</a>
+  </div>
+  <p>The strongest Euclid test in the series: blackbody anchored on <b>twenty-six</b> bands from
+  every other facility (HST + JWST + CFHT + HSC + IRAC + MIRI + SDSS + PS1), then Euclid predicted
+  and tested.</p>
+  <table>
+    <tr><th>Euclid band</th><th>median &Delta;</th><th>NMAD</th></tr>
+    <tr><td>VIS (0.70&nbsp;&mu;m)</td><td>+0.22</td><td>0.15</td></tr>
+    <tr><td>Y (1.07&nbsp;&mu;m)</td><td>&minus;0.05</td><td>0.16</td></tr>
+    <tr><td>J (1.35&nbsp;&mu;m)</td><td>&minus;0.11</td><td>0.10</td></tr>
+    <tr><td>H (1.75&nbsp;&mu;m)</td><td>&minus;0.17</td><td>0.11</td></tr>
+  </table>
+  <p class="note">Robust against the v05 result: <b>Euclid agrees with the 26-band multi-facility consensus
+  to &lesssim;0.2&nbsp;mag.</b>  VIS sits +0.22, shared with HST F814W (broad-band peak effect); NISP Y/J/H
+  track neighbouring facilities.</p>
+</div>
+
+</div>
+</body>
+</html>
