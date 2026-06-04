@@ -84,6 +84,22 @@ htmls/v01/sn_search/v05/
 htmls/v01/sn_search/v06/
 htmls/v01/sn_search/v07/
 
+# SED v01..v09 plot dirs are ~500 MB each (6000+ files of per-source SED
+# fit thumbnails).  Never tracked at old paths; not worth ~5 GB of git
+# bloat to track at new paths.  Regenerable from the SED scripts.
+htmls/v01/sed_v01/
+htmls/v01/sed_v02/
+htmls/v01/sed_v03/
+htmls/v01/sed_v04/
+htmls/v01/sed_v05/
+htmls/v01/sed_v06/
+htmls/v01/sed_v07/
+htmls/v01/sed_v08/
+htmls/v01/sed_v09/
+
+# star_orphans_v01 is 390 MB / 8195 untracked files — also not tracking.
+htmls/v01/star_orphans_v01/
+
 # ─── Per-session scratch ───────────────────────────────────────────────
 *.log
 !_aria2.log              # download wrappers keep this for resume

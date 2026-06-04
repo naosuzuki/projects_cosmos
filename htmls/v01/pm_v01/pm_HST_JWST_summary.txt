@@ -1,0 +1,8 @@
+Combo: HST_JWST  (HST − JWST)  Δt = -19.00 yr  (reference = JWST)
+N total: 55,584   cat_cat=55,285   gaia_m1=17   gaia_m2=282
+
+category               N   med pmra  med pmdec  NMAD pra  NMAD pdec  med pmtot  95% pmtot  max pmtot
+---------------------------------------------------------------------------------------------------------
+all               55,584      -3.79      -0.36      2.62       2.69       4.77      10.34      946.5
+stars             17,131      -4.25      -1.39      2.99       3.33       5.51      15.88      946.5
+agn_qso              779      -3.83      -0.10      2.40       2.35       4.64       8.87       47.9

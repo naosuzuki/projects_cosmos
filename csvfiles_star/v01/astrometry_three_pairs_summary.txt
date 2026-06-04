@@ -1,0 +1,19 @@
+Astrometric residuals — three survey pairs × stars/galaxies
+Common region: HST F814W ∩ JWST F115W pixel coverage
+Match radius: mutual-NN ≤ 1.0 arcsec
+Star criterion : DAO sharp ∈ (0.5, 0.75), |round|≤0.5, SNR≥5
+Galaxy criterion: DAO sharp ∈ (0.2, 0.4), |round|≤0.5, SNR≥5
+Residual = A - B (mas), with Δα · cosδ on the RA axis
+
+=== HST - Euclid ===
+      STAR  N= 24,943  med (dRA*, dDec) = ( +65.27,   +1.81) mas  NMAD (89.87, 96.99)
+       GAL  N=     31  med (dRA*, dDec) = ( +74.93,  -72.93) mas  NMAD (409.25, 293.70)
+
+=== JWST - Euclid ===
+      STAR  N= 44,149  med (dRA*, dDec) = (  +5.71,   -2.93) mas  NMAD (20.93, 21.26)
+       GAL  N=      4  med (dRA*, dDec) = ( -68.06, -181.43) mas  NMAD (571.85, 298.97)
+
+=== HST - JWST ===
+      STAR  N= 32,726  med (dRA*, dDec) = ( +53.73,   +7.31) mas  NMAD (119.68, 120.16)
+       GAL  N=    453  med (dRA*, dDec) = ( +29.64,  -13.75) mas  NMAD (332.30, 289.21)
+

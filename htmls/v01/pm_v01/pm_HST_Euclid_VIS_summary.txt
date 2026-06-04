@@ -1,0 +1,8 @@
+Combo: HST_Euclid_VIS  (HST − Euclid_VIS)  Δt = -19.50 yr  (reference = Euclid_VIS)
+N total: 110,923   cat_cat=110,025   gaia_m1=644   gaia_m2=254
+
+category               N   med pmra  med pmdec  NMAD pra  NMAD pdec  med pmtot  95% pmtot  max pmtot
+---------------------------------------------------------------------------------------------------------
+all              110,923      -3.53      -0.57      2.90       3.00       4.73      11.90      951.3
+stars             34,430      -4.16      -1.74      3.54       3.77       5.86      18.32      951.3
+agn_qso              712      -3.51      +0.24      2.42       2.36       4.40       9.10       48.3

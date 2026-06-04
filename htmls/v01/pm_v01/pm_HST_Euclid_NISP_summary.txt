@@ -1,0 +1,8 @@
+Combo: HST_Euclid_NISP  (HST − Euclid_NISP)  Δt = -19.50 yr  (reference = Euclid_NISP)
+N total: 95,882   cat_cat=94,998   gaia_m1=630   gaia_m2=254
+
+category               N   med pmra  med pmdec  NMAD pra  NMAD pdec  med pmtot  95% pmtot  max pmtot
+---------------------------------------------------------------------------------------------------------
+all               95,882      -3.62      -0.64      3.01       3.12       4.89      13.55      951.3
+stars             24,683      -4.65      -2.53      4.07       4.20       6.90      21.58      951.3
+agn_qso              655      -3.52      +0.15      2.44       2.44       4.43      10.43       48.3

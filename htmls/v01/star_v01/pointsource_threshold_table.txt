@@ -1,0 +1,15 @@
+Per-mag-bin ellipticity thresholds (Step 6, 95th-pctl of gaia_star+qso among unsaturated)
+
+Mag bin centres:  15.50  16.50  17.50  18.50  19.50  20.50  21.50  22.50  23.50  24.50  25.50  26.50  27.50
+
+=== HST (mag cat_mag_F814W_hst, ellip ellip_hst, sat<20.0) ===
+  ellip 95%ile: [ 0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.293  0.300]
+
+=== JWST (mag cat_mag_F115W_jwst, ellip ellip_jwst, sat<20.0) ===
+  ellip 95%ile: [ 0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300]
+
+=== Euclid_VIS (mag cat_mag_VIS_vis, ellip cat_ellipticity_vis, sat<20.0) ===
+  ellip 95%ile: [ 0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300]
+
+=== Euclid_NISP (mag cat_mag_NIR_H_nisp, ellip cat_ellipticity_nisp, sat<18.0) ===
+  ellip 95%ile: [ 0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.300  0.195  0.300  0.300]

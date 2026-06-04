@@ -1,0 +1,7 @@
+pair,population,N,med_dRA_mas,med_dDec_mas,NMAD_dRA_mas,NMAD_dDec_mas
+HST-Euclid,star,24943,+65.27,+1.81,89.87,96.99
+HST-Euclid,gal,31,+74.93,-72.93,409.25,293.70
+JWST-Euclid,star,44149,+5.71,-2.93,20.93,21.26
+JWST-Euclid,gal,4,-68.06,-181.43,571.85,298.97
+HST-JWST,star,32726,+53.73,+7.31,119.68,120.16
+HST-JWST,gal,453,+29.64,-13.75,332.30,289.21

@@ -1,0 +1,11 @@
+output                                      n_total   is_point_source     frac    time
+----------------------------------------------------------------------------------------
+refined_Euclid_VIS_Euclid_NISP              455,422            31,699    6.96%   23.4s
+refined_HST_Euclid_NISP                      94,998            24,120   25.39%    5.4s
+refined_HST_Euclid_VIS                      110,025            33,906   30.82%    4.1s
+refined_HST_JWST                             55,285            17,611   31.85%    3.8s
+refined_JWST_Euclid_NISP                     85,996             6,628    7.71%    7.1s
+refined_JWST_Euclid_VIS                      98,870             7,034    7.11%    6.2s
+refined_HST_JWST_Euclid_NISP                 36,832            10,077   27.36%    4.0s
+refined_HST_JWST_Euclid_VIS                  43,504            14,214   32.67%    3.8s
+refined_HST_JWST_Euclid_VIS_Euclid_NISP      34,752             9,856   28.36%    4.2s

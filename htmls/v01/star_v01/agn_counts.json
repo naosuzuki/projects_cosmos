@@ -1,0 +1,11 @@
+{
+  "HST_JWST": 695,
+  "HST_Euclid_VIS": 603,
+  "HST_Euclid_NISP": 547,
+  "JWST_Euclid_VIS": 850,
+  "JWST_Euclid_NISP": 794,
+  "Euclid_VIS_Euclid_NISP": 1482,
+  "HST_JWST_Euclid_VIS": 541,
+  "HST_JWST_Euclid_NISP": 482,
+  "HST_JWST_Euclid_VIS_Euclid_NISP": 472
+}

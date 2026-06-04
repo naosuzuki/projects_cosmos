@@ -1,0 +1,8 @@
+Combo: JWST_Euclid_VIS  (JWST − Euclid_VIS)  Δt = -0.50 yr  (reference = Euclid_VIS)
+N total: 99,435   cat_cat=98,870   gaia_m1=560   gaia_m2=5
+
+category               N   med pmra  med pmdec  NMAD pra  NMAD pdec  med pmtot  95% pmtot  max pmtot
+---------------------------------------------------------------------------------------------------------
+all               99,435      -6.43      +1.95     28.85      30.80      35.58     130.13      500.0
+stars              6,749      -5.32      -2.34     21.06      22.34      25.97      74.92      456.7
+agn_qso              850      -4.57      +2.65     32.89      35.15      40.79     159.87      469.6

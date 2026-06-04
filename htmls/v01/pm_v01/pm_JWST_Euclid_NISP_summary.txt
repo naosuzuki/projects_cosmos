@@ -1,0 +1,8 @@
+Combo: JWST_Euclid_NISP  (JWST − Euclid_NISP)  Δt = -0.50 yr  (reference = Euclid_NISP)
+N total: 86,505   cat_cat=85,996   gaia_m1=504   gaia_m2=5
+
+category               N   med pmra  med pmdec  NMAD pra  NMAD pdec  med pmtot  95% pmtot  max pmtot
+---------------------------------------------------------------------------------------------------------
+all               86,505      -5.68      +1.59     31.53      33.58      38.58     169.09      599.6
+stars              6,343      -5.41      -2.19     20.65      22.10      25.54      75.13      574.9
+agn_qso              794      -4.54      +2.45     38.13      41.27      48.31     187.73      543.8

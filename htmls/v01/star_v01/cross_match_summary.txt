@@ -1,0 +1,21 @@
+output                                    k  union_pre  intersect    gaia     pos    time
+------------------------------------------------------------------------------------------
+Euclid_VIS_Euclid_NISP                    2    931,573    455,422   6,054 449,368   28.4s
+HST_Euclid_NISP                           2    868,191     94,998   3,660  91,338    8.6s
+HST_Euclid_VIS                            2    907,475    110,025   3,684 106,341    6.9s
+HST_JWST                                  2    493,998     55,285   1,189  54,096    6.0s
+JWST_Euclid_NISP                          2    834,304     85,996   1,057  84,939   10.6s
+JWST_Euclid_VIS                           2    875,723     98,870   1,067  97,803    9.3s
+HST_JWST_Euclid_NISP                      3  1,002,260     36,832   1,060  35,772    9.1s
+HST_JWST_Euclid_VIS                       3  1,033,129     43,504   1,070  42,434    8.7s
+HST_JWST_Euclid_VIS_Euclid_NISP           4  1,215,146     34,752   1,057  33,695   11.7s
+
+  Euclid_VIS_Euclid_NISP                        Euclid_VIS=455,422  Euclid_NISP=455,422  
+  HST_Euclid_NISP                               HST=94,998  Euclid_NISP=94,998  
+  HST_Euclid_VIS                                HST=110,025  Euclid_VIS=110,025  
+  HST_JWST                                      HST=55,285  JWST=55,285  
+  JWST_Euclid_NISP                              JWST=85,996  Euclid_NISP=85,996  
+  JWST_Euclid_VIS                               JWST=98,870  Euclid_VIS=98,870  
+  HST_JWST_Euclid_NISP                          HST=36,832  JWST=36,832  Euclid_NISP=36,832  
+  HST_JWST_Euclid_VIS                           HST=43,504  JWST=43,504  Euclid_VIS=43,504  
+  HST_JWST_Euclid_VIS_Euclid_NISP               HST=34,752  JWST=34,752  Euclid_VIS=34,752  Euclid_NISP=34,752  

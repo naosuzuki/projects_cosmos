@@ -1,0 +1,38 @@
+{
+  "HST_JWST": {
+    "limit_mag": 26.716783397631712,
+    "limiting_band": "HST/F814W"
+  },
+  "HST_Euclid_VIS": {
+    "limit_mag": 26.716783397631712,
+    "limiting_band": "HST/F814W"
+  },
+  "HST_Euclid_NISP": {
+    "limit_mag": 26.643635057651235,
+    "limiting_band": "Euclid_NISP/NIR_Y"
+  },
+  "JWST_Euclid_VIS": {
+    "limit_mag": 27.7890067587549,
+    "limiting_band": "JWST/F115W"
+  },
+  "JWST_Euclid_NISP": {
+    "limit_mag": 26.643635057651235,
+    "limiting_band": "Euclid_NISP/NIR_Y"
+  },
+  "Euclid_VIS_Euclid_NISP": {
+    "limit_mag": 26.643635057651235,
+    "limiting_band": "Euclid_NISP/NIR_Y"
+  },
+  "HST_JWST_Euclid_VIS": {
+    "limit_mag": 26.716783397631712,
+    "limiting_band": "HST/F814W"
+  },
+  "HST_JWST_Euclid_NISP": {
+    "limit_mag": 26.643635057651235,
+    "limiting_band": "Euclid_NISP/NIR_Y"
+  },
+  "HST_JWST_Euclid_VIS_Euclid_NISP": {
+    "limit_mag": 26.643635057651235,
+    "limiting_band": "Euclid_NISP/NIR_Y"
+  }
+}
