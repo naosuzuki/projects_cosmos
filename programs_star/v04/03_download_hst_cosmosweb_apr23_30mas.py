@@ -18,7 +18,7 @@ This script downloads the HST/ACS F814W mosaics that were drizzled
 onto the A-tile grid by the Apr-2023 reduction.
 
 Source : https://exchg.calet.org/cosmosweb/COSMOS-Web_Apr23/ACS-cosmos-orig-only/
-Target : /Volumes/exdisk1/data/HST/COSMOS_ACS200/
+Target : /Volumes/exdisk1/data/HST/COSMOS_ACS2005/
 Auth   : HTTP Basic via ~/.netrc (already provisioned)
 
 Files  : 10 tiles (A1..A10) × 3 products (drz, err, wht), ~1.92 GB each
@@ -51,7 +51,7 @@ import time
 from pathlib import Path
 
 BASE_URL = 'https://exchg.calet.org/cosmosweb/COSMOS-Web_Apr23/ACS-cosmos-orig-only/'
-DEST     = Path('/Volumes/exdisk1/data/HST/COSMOS_ACS200')
+DEST     = Path('/Volumes/exdisk1/data/HST/COSMOS_ACS2005')
 TILES    = [f'A{i}' for i in range(1, 11)]
 PRODUCTS = ['drz', 'err', 'wht']
 PIXSCALE = '30mas'
