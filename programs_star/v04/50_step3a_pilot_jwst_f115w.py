@@ -39,8 +39,10 @@ def parse_args():
     p.add_argument('--tile', default='A4',
                    help='COSMOS-Web tile letter (e.g. A1, A4, B3). Default A4.')
     p.add_argument('--filter', default='f115w', choices=['f115w','f150w','f277w','f444w'])
-    p.add_argument('--cutout-size', type=int, default=2000,
-                   help='Cutout size in pixels (default 2000 = 60\" at 30 mas).')
+    p.add_argument('--cutout-size', type=int, default=0,
+                   help='Cutout size in pixels (default 0 = full tile, '
+                        '~120 arcmin² → ~130 Gaia stars in COSMOS at 1.09/arcmin²; '
+                        'pass e.g. 5000 for a smaller faster pilot).')
     p.add_argument('--skip-extract', action='store_true',
                    help='Reuse existing cutout/catalog if present (debug).')
     return p.parse_args()
@@ -70,14 +72,20 @@ def make_cutout(args, work: Path) -> tuple[Path, Path]:
         sci_hdr = h['SCI'].header
         wht_hdr = h['WHT'].header
         nx, ny  = sci_hdr['NAXIS1'], sci_hdr['NAXIS2']
-        # Center cutout
-        size = args.cutout_size
-        cx, cy = nx//2, ny//2
-        x0, x1 = cx - size//2, cx + size//2
-        y0, y1 = cy - size//2, cy + size//2
-        print(f'Cutout : [{x0}:{x1}, {y0}:{y1}]  '
-              f'= {x1-x0}×{y1-y0} px at 30 mas → '
-              f'{(x1-x0)*0.030:.0f}″ × {(y1-y0)*0.030:.0f}″')
+        if args.cutout_size <= 0:
+            # full tile
+            x0, x1, y0, y1 = 0, nx, 0, ny
+            print(f'Full tile : {nx}×{ny} px at 30 mas → '
+                  f'{nx*0.030/60:.2f}′ × {ny*0.030/60:.2f}′ '
+                  f'= {nx*ny*0.030*0.030/3600:.1f} arcmin²')
+        else:
+            size = args.cutout_size
+            cx, cy = nx//2, ny//2
+            x0, x1 = cx - size//2, cx + size//2
+            y0, y1 = cy - size//2, cy + size//2
+            print(f'Cutout : [{x0}:{x1}, {y0}:{y1}]  '
+                  f'= {x1-x0}×{y1-y0} px at 30 mas → '
+                  f'{(x1-x0)*0.030:.0f}″ × {(y1-y0)*0.030:.0f}″')
         sci_data = h['SCI'].data[y0:y1, x0:x1].copy()
         wht_data = h['WHT'].data[y0:y1, x0:x1].copy()
     # Patch the WCS reference pixel so the cutout's WCS stays valid.
@@ -154,8 +162,20 @@ def run_sex(sci: Path, wht: Path, out_cat: Path,
 
 def run_psfex(in_cat: Path) -> Path:
     cfg = CONFIGS / 'default.psfex'
-    cmd = ['psfex', str(in_cat), '-c', str(cfg)]
-    print(f'  cmd: psfex {in_cat.name} -c {cfg.name}')
+    # JWST F115W tuned: stars at the narrow end of the FWHM
+    # distribution (~2 pix at 30 mas after drizzle).  Tight upper
+    # bound rejects galaxies; AUTOSELECT then narrows further.
+    # 5th-percentile FWHM in pass-1 was 2.15 pix → that IS the
+    # stellar locus, not a contaminant.
+    cmd = ['psfex', str(in_cat), '-c', str(cfg),
+           '-SAMPLE_FWHMRANGE',  '1.5,2.5',   # tight stellar locus
+           '-SAMPLE_MAXELLIP',   '0.10',      # very round only
+           '-SAMPLE_MINSN',      '30',        # high SNR only
+           '-SAMPLE_VARIABILITY','0.15',
+           '-SAMPLE_AUTOSELECT', 'Y',
+           ]
+    print(f'  cmd: psfex {in_cat.name} -c {cfg.name} '
+          f'-SAMPLE_FWHMRANGE 1.5,2.5 -SAMPLE_MAXELLIP 0.10 -SAMPLE_MINSN 30')
     t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
