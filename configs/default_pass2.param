@@ -1,0 +1,46 @@
+# SExtractor pass-2 output columns — PSF photometry, after PSFEx.
+# Drop VIGNET (we have the PSF model now); add CHI2_PSF, SPREAD_MODEL.
+
+NUMBER
+X_IMAGE
+Y_IMAGE
+XWIN_IMAGE
+YWIN_IMAGE
+ALPHA_J2000
+DELTA_J2000
+
+# shape / morphology (kept for Step 3b classifier)
+A_IMAGE
+B_IMAGE
+THETA_IMAGE
+ELONGATION
+ELLIPTICITY
+FWHM_IMAGE
+FLUX_RADIUS
+CLASS_STAR
+
+# aperture / AUTO photometry (kept as sanity check)
+FLUX_APER(3)
+FLUXERR_APER(3)
+MAG_APER(3)
+MAGERR_APER(3)
+FLUX_AUTO
+FLUXERR_AUTO
+MAG_AUTO
+MAGERR_AUTO
+
+# PSF photometry (THE point of pass 2)
+FLUX_PSF
+FLUXERR_PSF
+MAG_PSF
+MAGERR_PSF
+CHI2_PSF
+SPREAD_MODEL
+SPREADERR_MODEL
+
+# flags + background
+FLAGS
+FLAGS_WEIGHT
+BACKGROUND
+THRESHOLD
+SNR_WIN

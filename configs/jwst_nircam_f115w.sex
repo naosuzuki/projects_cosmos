@@ -35,7 +35,7 @@ MASK_TYPE        CORRECT
 
 #------------------------------ Weighting ------------------------------------
 WEIGHT_TYPE      MAP_WEIGHT
-WEIGHT_IMAGE     ""            # supplied at runtime via -WEIGHT_IMAGE
+# WEIGHT_IMAGE supplied at runtime via -WEIGHT_IMAGE
 WEIGHT_THRESH    0
 WEIGHT_GAIN      Y
 
