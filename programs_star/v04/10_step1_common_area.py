@@ -136,14 +136,29 @@ class TileRecord:
 # Discovery — list every per-tile dataset
 # ──────────────────────────────────────────────────────────────────────
 def discover_hst() -> list[TileRecord]:
-    """HST_2005: 10 tiles × {drz, err, wht}. Use the drz path as the canonical."""
+    """HST 2005-era F814W mosaics drizzled onto both JWST tile grids:
+       - Apr-2023 reduction (`2023apr` in filename) → A1..A10 (southern half)
+       - Jan-2024 reduction (`2024jan` in filename) → B1..B10 (northern half)
+
+    Both share the same original 2003-2005 COSMOS ACS observations and
+    the same separate sci/wht/err FITS layout.  Discovery globs the
+    directory so any future reduction (e.g., 2024jun) is picked up
+    automatically without code changes.
+    """
     out = []
-    for tile in [f'B{i}' for i in range(1, 11)]:
-        drz = HST_DIR / f'mosaic_cosmos_web_2024jan_30mas_tile_{tile}_hst_acs_wfc_f814w_drz.fits'
-        if not drz.exists():
-            print(f'  WARN: missing HST {tile}: {drz}')
+    pat = re.compile(
+        r'^mosaic_cosmos_web_(\d{4}(?:jan|feb|mar|apr|may|jun|'
+        r'jul|aug|sep|oct|nov|dec))_30mas_tile_([AB]\d+)'
+        r'_hst_acs_wfc_f814w_drz\.fits$'
+    )
+    for f in sorted(HST_DIR.glob(
+            'mosaic_cosmos_web_*_30mas_tile_*_hst_acs_wfc_f814w_drz.fits')):
+        m = pat.match(f.name)
+        if not m:
             continue
-        out.append(TileRecord('HST', 'F814W', tile, str(drz),
+        # epoch = m.group(1)  # e.g. '2023apr' / '2024jan' — not stored
+        tile = m.group(2)     # e.g. 'A3' / 'B5'
+        out.append(TileRecord('HST', 'F814W', tile, str(f),
                               file_format='separate_sci_wht_err'))
     return out
 
