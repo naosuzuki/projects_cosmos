@@ -1,0 +1,48 @@
+# SExtractor config — Euclid VIS (DR1 MER mosaics, 0.10"/pix).
+#
+# Notes:
+#   VIS native pixel scale 0.10".  PSF FWHM ~0.16" (~1.6 pix).
+#   ZP_AB from MER header (typically 25.5 in DR1).
+#   GAIN ~ 30 e/ADU but with WHT-based noise tracking GAIN=0 works.
+
+CATALOG_TYPE     FITS_LDAC
+PARAMETERS_NAME  default.param
+DETECT_TYPE      CCD
+DETECT_MINAREA   5
+DETECT_THRESH    1.5
+ANALYSIS_THRESH  1.5
+FILTER           Y
+FILTER_NAME      default.conv
+DEBLEND_NTHRESH  32
+DEBLEND_MINCONT  0.005
+CLEAN            Y
+CLEAN_PARAM      1.0
+MASK_TYPE        CORRECT
+WEIGHT_TYPE      MAP_WEIGHT
+WEIGHT_THRESH    0
+WEIGHT_GAIN      Y
+PHOT_APERTURES   10,20,30      # 1.0", 2.0", 3.0" at 0.10"/pix
+PHOT_AUTOPARAMS  2.5,3.5
+PHOT_PETROPARAMS 2.0,3.5
+SATUR_LEVEL      1.0e10
+SATUR_KEY        SATURATE
+MAG_ZEROPOINT    25.50         # OVERRIDDEN per-mosaic from header ZP
+MAG_GAMMA        4.0
+GAIN             0.0
+PIXEL_SCALE      0.100
+SEEING_FWHM      0.160
+STARNNW_NAME     default.nnw
+BACK_SIZE        64
+BACK_FILTERSIZE  3
+BACKPHOTO_TYPE   LOCAL
+BACKPHOTO_THICK  24
+CHECKIMAGE_TYPE  NONE
+MEMORY_OBJSTACK  10000
+MEMORY_PIXSTACK  1000000
+MEMORY_BUFSIZE   4096
+VERBOSE_TYPE     NORMAL
+WRITE_XML        N
+NTHREADS         0
+PSF_NAME         psf.psf
+PSF_NMAX         1
+PATTERN_TYPE     RINGS-HARMONIC
