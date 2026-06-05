@@ -11,7 +11,7 @@ the Gaia table down to that polygon and saves it alongside the
 parent.
 
 Inputs:
-  /Volumes/exdisk1/data/GAIA_DR3/COSMOS/gaia_dr3_cosmos.parquet
+  /Volumes/exdisk1/data/catalog/Gaia/COSMOS/gaia_dr3_cosmos.parquet
   csvfiles_star/v04/common_area_3way.wkt
 
 Outputs (alongside the parent):
@@ -31,7 +31,7 @@ import pandas as pd
 from shapely import wkt as shp_wkt
 from shapely import points
 
-GAIA_DIR    = Path('/Volumes/exdisk1/data/GAIA_DR3/COSMOS')
+GAIA_DIR    = Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS')
 GAIA_FULL   = GAIA_DIR / 'gaia_dr3_cosmos.parquet'
 GAIA_3WAY   = GAIA_DIR / 'gaia_dr3_3way.parquet'
 GAIA_3WAY_CSV  = GAIA_DIR / 'gaia_dr3_3way.csv'

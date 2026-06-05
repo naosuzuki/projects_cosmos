@@ -19,7 +19,7 @@ Spatial selection: same bbox as the Gaia pull
         Dec   1.10 ->   3.40   (~2.30 deg tall)
   area  ~5.6 deg^2 ADQL, then ~3.91 deg^2 after Euclid VIS polygon filter
 
-Outputs (to /Volumes/exdisk1/data/SDSS/COSMOS/):
+Outputs (to /Volumes/exdisk1/data/catalog/SDSS/COSMOS/):
   sdss_cosmos.parquet         canonical (PhotoPrimary in VIS polygon)
   sdss_cosmos.csv             human-readable sidecar
   sdss_cosmos.query.sql       exact SDSS SkyServer SQL used
@@ -43,7 +43,7 @@ from pathlib import Path
 RA_MIN,  RA_MAX  = 148.85, 151.30
 DEC_MIN, DEC_MAX =   1.10,   3.40
 
-OUT_DIR = Path('/Volumes/exdisk1/data/SDSS/COSMOS')
+OUT_DIR = Path('/Volumes/exdisk1/data/catalog/SDSS/COSMOS')
 
 # SDSS SkyServer SQL.  PhotoPrimary is the deduplicated primary detections.
 SQL = f"""

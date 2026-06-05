@@ -34,6 +34,10 @@ from pathlib import Path
 
 import pandas as pd
 
+# Catalog (parquet etc.) lives under /catalog/SDSS/COSMOS/ since the
+# Step 2 reorg.  Frames stay under the original /SDSS/COSMOS/frames/
+# tree (the imaging tree is independent of the catalog tree).
+CATALOG_DIR = Path('/Volumes/exdisk1/data/catalog/SDSS/COSMOS')
 SDSS_DIR    = Path('/Volumes/exdisk1/data/SDSS/COSMOS')
 FRAMES_ROOT = SDSS_DIR / 'frames'
 BASE_URL    = 'https://data.sdss.org/sas/dr17/eboss/photoObj/frames'
@@ -72,8 +76,8 @@ def main():
     if shutil.which('aria2c') is None:
         sys.exit('aria2c not in PATH.  brew install aria2')
 
-    cat = SDSS_DIR / ('sdss_cosmos.parquet' if args.scope == 'vis'
-                      else 'sdss_3way.parquet')
+    cat = CATALOG_DIR / ('sdss_cosmos.parquet' if args.scope == 'vis'
+                         else 'sdss_3way.parquet')
     if not cat.exists():
         sys.exit(f'{cat} not found — run 22_step2_sdss_pull.py first.')
 

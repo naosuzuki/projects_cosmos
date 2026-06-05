@@ -20,7 +20,7 @@ Spatial selection (two-stage):
      coverage — the biggest of our four mission footprints, but no
      wider.
 
-Outputs (to /Volumes/exdisk1/data/GAIA_DR3/COSMOS/):
+Outputs (to /Volumes/exdisk1/data/catalog/Gaia/COSMOS/):
   gaia_dr3_cosmos.parquet         canonical
   gaia_dr3_cosmos.csv             human-readable sidecar
   gaia_dr3_cosmos.query.adql      exact ADQL used (reproducibility)
@@ -56,7 +56,7 @@ from pathlib import Path
 RA_MIN,  RA_MAX  = 148.85, 151.30
 DEC_MIN, DEC_MAX =   1.10,   3.40
 
-OUT_DIR = Path('/Volumes/exdisk1/data/GAIA_DR3/COSMOS')
+OUT_DIR = Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS')
 
 ADQL = f"""
 SELECT

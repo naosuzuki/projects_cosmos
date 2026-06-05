@@ -20,7 +20,7 @@ Output is identical to the cone-search version so the rest of the
 pipeline (Step 2.4 3-way subset, Step 2.5 image download) doesn't care
 which puller produced it.
 
-Outputs (to /Volumes/exdisk1/data/PanSTARRS/COSMOS/):
+Outputs (to /Volumes/exdisk1/data/catalog/PanSTARRS/COSMOS/):
   ps1_cosmos.parquet         in Euclid VIS polygon
   ps1_cosmos.csv             human-readable sidecar
   ps1_cosmos.query.sql       the SQL we ran
@@ -38,7 +38,7 @@ from pathlib import Path
 RA_MIN,  RA_MAX  = 148.85, 151.30
 DEC_MIN, DEC_MAX =   1.10,   3.40
 
-OUT_DIR = Path('/Volumes/exdisk1/data/PanSTARRS/COSMOS')
+OUT_DIR = Path('/Volumes/exdisk1/data/catalog/PanSTARRS/COSMOS')
 
 # ── PS1 DR2 MeanObjectView columns (subset matching cone-search) ────
 COLUMNS = [

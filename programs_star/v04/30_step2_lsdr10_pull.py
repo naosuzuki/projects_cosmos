@@ -24,7 +24,7 @@ Spatial selection (two-stage like the other 2x scripts):
   2. Shapely point-in-polygon to the exact 3.91 deg² Euclid VIS
      footprint.
 
-Outputs (to /Volumes/exdisk1/data/LSDR10/COSMOS/):
+Outputs (to /Volumes/exdisk1/data/catalog/DESI_Legacy/COSMOS/):
   lsdr10_cosmos.parquet         canonical (in VIS polygon)
   lsdr10_cosmos.csv             human-readable sidecar
   lsdr10_cosmos.query.adql      reproducible ADQL
@@ -61,7 +61,7 @@ from pathlib import Path
 RA_MIN,  RA_MAX  = 148.85, 151.30
 DEC_MIN, DEC_MAX =   1.10,   3.40
 
-OUT_DIR = Path('/Volumes/exdisk1/data/LSDR10/COSMOS')
+OUT_DIR = Path('/Volumes/exdisk1/data/catalog/DESI_Legacy/COSMOS')
 
 TAP_URL = 'https://datalab.noirlab.edu/tap'
 TABLE   = 'ls_dr10.tractor'

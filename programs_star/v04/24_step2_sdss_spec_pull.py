@@ -14,7 +14,7 @@ Spatial selection: same two-stage as Gaia / PhotoPrimary
   2. Shapely point-in-polygon filter → Euclid VIS footprint
   3. Then a further point-in-polygon filter → 3-way HST∩JWST∩VIS
 
-Outputs (to /Volumes/exdisk1/data/SDSS/COSMOS/):
+Outputs (to /Volumes/exdisk1/data/catalog/SDSS/COSMOS/):
   sdss_spec_cosmos.parquet         in VIS polygon
   sdss_spec_cosmos.csv
   sdss_spec_cosmos.query.sql
@@ -40,7 +40,7 @@ from pathlib import Path
 RA_MIN,  RA_MAX  = 148.85, 151.30
 DEC_MIN, DEC_MAX =   1.10,   3.40
 
-OUT_DIR = Path('/Volumes/exdisk1/data/SDSS/COSMOS')
+OUT_DIR = Path('/Volumes/exdisk1/data/catalog/SDSS/COSMOS')
 
 SQL = f"""
 SELECT

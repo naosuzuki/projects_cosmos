@@ -6,7 +6,7 @@ subset of the SDSS DR17 catalog landed by 22_step2_sdss_pull.py.
 Sister to 21_step2_gaia_dr3_3way_subset.py.
 
 Inputs:
-  /Volumes/exdisk1/data/SDSS/COSMOS/sdss_cosmos.parquet
+  /Volumes/exdisk1/data/catalog/SDSS/COSMOS/sdss_cosmos.parquet
   csvfiles_star/v04/common_area_3way.wkt
 Outputs (alongside the parent):
   sdss_3way.parquet
@@ -22,7 +22,7 @@ import pandas as pd
 from shapely import wkt as shp_wkt
 from shapely import points
 
-SDSS_DIR  = Path('/Volumes/exdisk1/data/SDSS/COSMOS')
+SDSS_DIR  = Path('/Volumes/exdisk1/data/catalog/SDSS/COSMOS')
 SDSS_FULL = SDSS_DIR / 'sdss_cosmos.parquet'
 SDSS_3WAY = SDSS_DIR / 'sdss_3way.parquet'
 SDSS_3WAY_CSV  = SDSS_DIR / 'sdss_3way.csv'

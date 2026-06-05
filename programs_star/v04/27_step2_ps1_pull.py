@@ -22,7 +22,7 @@ Spatial selection:
   2. Shapely point-in-polygon filter → exact Euclid VIS footprint
      (3.91 deg^2).
 
-Outputs (to /Volumes/exdisk1/data/PanSTARRS/COSMOS/):
+Outputs (to /Volumes/exdisk1/data/catalog/PanSTARRS/COSMOS/):
   ps1_cosmos.parquet         canonical (MeanObject in Euclid VIS polygon)
   ps1_cosmos.csv             human-readable sidecar
   ps1_cosmos.meta.json       timestamp + row counts + bbox + columns
@@ -46,7 +46,7 @@ import math
 HALF_DIAG_DEG = 0.5 * math.hypot(RA_MAX - RA_MIN,
                                    DEC_MAX - DEC_MIN) + 0.05
 
-OUT_DIR = Path('/Volumes/exdisk1/data/PanSTARRS/COSMOS')
+OUT_DIR = Path('/Volumes/exdisk1/data/catalog/PanSTARRS/COSMOS')
 
 # MAST PS1 DR2 MeanObject column subset.  Names follow PS1 schema docs:
 # https://outerspace.stsci.edu/display/PANSTARRS/PS1+MeanObject+table+fields

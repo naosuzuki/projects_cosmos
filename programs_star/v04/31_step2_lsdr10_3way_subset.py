@@ -6,7 +6,7 @@ subset of the LS DR10 Tractor catalog landed by 30_step2_lsdr10_pull.py.
 Sister to 21_/23_/28_ for Gaia DR3, SDSS DR17, PS1 DR2.
 
 Inputs:
-  /Volumes/exdisk1/data/LSDR10/COSMOS/lsdr10_cosmos.parquet
+  /Volumes/exdisk1/data/catalog/DESI_Legacy/COSMOS/lsdr10_cosmos.parquet
   csvfiles_star/v04/common_area_3way.wkt
 Outputs (alongside the parent):
   lsdr10_3way.parquet
@@ -23,7 +23,7 @@ import pandas as pd
 from shapely import wkt as shp_wkt
 from shapely import points
 
-LS_DIR  = Path('/Volumes/exdisk1/data/LSDR10/COSMOS')
+LS_DIR  = Path('/Volumes/exdisk1/data/catalog/DESI_Legacy/COSMOS')
 LS_FULL = LS_DIR / 'lsdr10_cosmos.parquet'
 LS_3WAY = LS_DIR / 'lsdr10_3way.parquet'
 LS_3WAY_CSV  = LS_DIR / 'lsdr10_3way.csv'

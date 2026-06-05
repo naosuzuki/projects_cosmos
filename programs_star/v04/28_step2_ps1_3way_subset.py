@@ -6,7 +6,7 @@ subset of the PS1 DR2 catalog landed by 27_step2_ps1_pull*.py.
 Sister to 21_ (Gaia DR3 3-way) and 23_ (SDSS DR17 3-way).
 
 Inputs:
-  /Volumes/exdisk1/data/PanSTARRS/COSMOS/ps1_cosmos.parquet
+  /Volumes/exdisk1/data/catalog/PanSTARRS/COSMOS/ps1_cosmos.parquet
   csvfiles_star/v04/common_area_3way.wkt
 Outputs (alongside the parent):
   ps1_3way.parquet
@@ -22,7 +22,7 @@ import pandas as pd
 from shapely import wkt as shp_wkt
 from shapely import points
 
-PS1_DIR  = Path('/Volumes/exdisk1/data/PanSTARRS/COSMOS')
+PS1_DIR  = Path('/Volumes/exdisk1/data/catalog/PanSTARRS/COSMOS')
 PS1_FULL = PS1_DIR / 'ps1_cosmos.parquet'
 PS1_3WAY = PS1_DIR / 'ps1_3way.parquet'
 PS1_3WAY_CSV  = PS1_DIR / 'ps1_3way.csv'
