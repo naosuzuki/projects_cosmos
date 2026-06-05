@@ -1,0 +1,80 @@
+# SExtractor config — JWST NIRCam F115W (COSMOS-Web 30mas mosaics)
+#
+# Override file passed as `sex -c jwst_nircam_f115w.sex IMAGE`.
+# It inherits the column list (default.param), NN weights (default.nnw),
+# and Gaussian kernel (default.conv) from the same configs/ dir.
+#
+# Image format expected:
+#   /Volumes/exdisk1/data/JWST/COSMOS_v0.8/mosaic_nircam_f115w_COSMOS-Web_30mas_<TILE>_v1.0_i2d.fits
+#   SCI extension carries data in MJy/sr; WHT extension is the weight.
+#
+# Instrument / filter parameters (JWST NIRCam F115W on COSMOS-Web 30mas):
+#   pixel scale  : 0.030 arcsec / pixel
+#   PSF FWHM     : ~0.045 arcsec (diffraction-limited; coadd-broadened)
+#   ZP (AB)      : computed from header PIXAR_SR by the wrapper script,
+#                  passed in via -MAG_ZEROPOINT.  Typical: ~28.08.
+#   GAIN         : drizzled mosaic — effective gain encoded via WHT;
+#                  set to 0.0 below so SExtractor uses WHT-derived noise.
+
+#-------------------------------- Catalog ------------------------------------
+CATALOG_TYPE     FITS_LDAC
+PARAMETERS_NAME  default.param
+
+#------------------------------- Extraction ----------------------------------
+DETECT_TYPE      CCD
+DETECT_MINAREA   5
+DETECT_THRESH    1.5
+ANALYSIS_THRESH  1.5
+FILTER           Y
+FILTER_NAME      default.conv
+DEBLEND_NTHRESH  64
+DEBLEND_MINCONT  0.0005
+CLEAN            Y
+CLEAN_PARAM      1.0
+MASK_TYPE        CORRECT
+
+#------------------------------ Weighting ------------------------------------
+WEIGHT_TYPE      MAP_WEIGHT
+WEIGHT_IMAGE     ""            # supplied at runtime via -WEIGHT_IMAGE
+WEIGHT_THRESH    0
+WEIGHT_GAIN      Y
+
+#------------------------------ Photometry -----------------------------------
+PHOT_APERTURES   10,17,33      # 0.3", 0.5", 1.0" diameters at 0.030"/pix
+PHOT_AUTOPARAMS  2.5,3.5
+PHOT_PETROPARAMS 2.0,3.5
+SATUR_LEVEL      1.0e10        # drizzled float mosaic — effectively no engineering sat
+SATUR_KEY        SATURATE      # but SATURATE if header carries it
+MAG_ZEROPOINT    28.08         # default; OVERRIDDEN per-tile by wrapper via -MAG_ZEROPOINT
+MAG_GAMMA        4.0
+GAIN             0.0           # 0 = derive noise from WEIGHT
+GAIN_KEY         GAIN
+PIXEL_SCALE      0.030
+
+#------------------------- Star/Galaxy Separation ----------------------------
+SEEING_FWHM      0.045
+STARNNW_NAME     default.nnw
+
+#------------------------------ Background -----------------------------------
+BACK_SIZE        128
+BACK_FILTERSIZE  3
+BACKPHOTO_TYPE   LOCAL
+BACKPHOTO_THICK  24
+
+#------------------------------ Check images ---------------------------------
+CHECKIMAGE_TYPE  NONE
+
+#--------------------- Memory ------------------------------------------------
+MEMORY_OBJSTACK  10000
+MEMORY_PIXSTACK  1000000
+MEMORY_BUFSIZE   4096
+
+#----------------------------- Miscellaneous ---------------------------------
+VERBOSE_TYPE     NORMAL
+WRITE_XML        N
+NTHREADS         0
+
+#---------------------- PSF photometry (PSFEx-supplied) ----------------------
+PSF_NAME         psf.psf       # set at runtime by wrapper after PSFEx pass
+PSF_NMAX         1
+PATTERN_TYPE     RINGS-HARMONIC

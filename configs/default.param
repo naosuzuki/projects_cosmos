@@ -1,0 +1,52 @@
+# SExtractor output catalog columns for v04 Step 3a photometry.
+# Keep this minimal — full astrometry + PSF photometry + shape flags
+# for downstream Step 3b classifier + Step 4 saturation calibration.
+
+NUMBER                  # ID running number
+X_IMAGE                 # x centroid (pix)
+Y_IMAGE                 # y centroid (pix)
+XWIN_IMAGE              # windowed x centroid (better SNR)
+YWIN_IMAGE              # windowed y centroid
+ALPHA_J2000             # RA J2000 (deg)
+DELTA_J2000             # Dec J2000 (deg)
+
+# --- shape (PSF / morphology classifier inputs) ---
+A_IMAGE                 # major axis (pix)
+B_IMAGE                 # minor axis (pix)
+THETA_IMAGE             # position angle
+ELONGATION              # A/B
+ELLIPTICITY             # 1 - B/A
+FWHM_IMAGE              # FWHM (pix)
+FLUX_RADIUS             # half-light radius (used by PSFEx)
+CLASS_STAR              # SExtractor stellarity (DEFAULT.NNW)
+
+# --- aperture photometry (multiple apertures) ---
+FLUX_APER(3)            # 3 apertures: 3, 5, 10 px diameter
+FLUXERR_APER(3)
+MAG_APER(3)
+MAGERR_APER(3)
+
+# --- AUTO (Kron-like) ---
+FLUX_AUTO
+FLUXERR_AUTO
+MAG_AUTO
+MAGERR_AUTO
+
+# --- PSF photometry (PSFEx-supplied) ---
+FLUX_PSF
+FLUXERR_PSF
+MAG_PSF
+MAGERR_PSF
+CHI2_PSF                # PSFEx goodness-of-fit  → key input to Step 3b
+SPREAD_MODEL            # PSFEx spread parameter — alternative star/galaxy axis
+SPREADERR_MODEL
+
+# --- flags ---
+FLAGS                   # SExtractor flags
+IMAFLAGS_ISO            # mask flags integrated over isophote
+FLAGS_WEIGHT            # weight-image flags
+
+# --- background ---
+BACKGROUND
+THRESHOLD
+SNR_WIN

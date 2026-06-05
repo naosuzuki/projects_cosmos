@@ -1,0 +1,38 @@
+# Default PSFEx configuration for v04 Step 3a.
+#
+# Input: FITS_LDAC catalog from SExtractor first pass with
+#        VIGNET, FLUX_RADIUS, FLAGS, ELLIPTICITY, SNR_WIN, X/Y_IMAGE.
+
+#-------------------------------- PSF model ---------------------------------
+BASIS_TYPE      PIXEL_AUTO
+BASIS_NUMBER    20
+PSF_SAMPLING    1.0
+PSF_ACCURACY    0.01
+PSF_SIZE        25,25
+CENTER_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PHOTFLUX_KEY    FLUX_APER(1)
+PHOTFLUXERR_KEY FLUXERR_APER(1)
+
+#----------------------------- PSF variability -----------------------------
+PSFVAR_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PSFVAR_GROUPS   1,1
+PSFVAR_DEGREES  2
+
+#----------------------------- Source selection ----------------------------
+SAMPLE_AUTOSELECT  Y
+SAMPLEVAR_TYPE     SEEING
+SAMPLE_FWHMRANGE   1.5,12.0    # pixels
+SAMPLE_VARIABILITY 0.2
+SAMPLE_MINSN       20.0
+SAMPLE_MAXELLIP    0.3
+SAMPLE_FLAGMASK    0x00fe
+
+#----------------------------- Output catalog -------------------------------
+OUTCAT_TYPE        FITS_LDAC
+
+#------------------------------ Check-Images --------------------------------
+CHECKPLOT_DEV       NULL
+CHECKIMAGE_TYPE     NONE
+WRITE_XML           N
+VERBOSE_TYPE        QUIET
+NTHREADS            0

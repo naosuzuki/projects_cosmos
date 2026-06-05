@@ -1,0 +1,58 @@
+# Default SExtractor configuration for v04 Step 3a.
+# Per-band overrides (SEEING_FWHM, MAG_ZEROPOINT, GAIN, etc.) are set
+# via -COMMANDLINE arguments by the wrapper Python script.
+
+#-------------------------------- Catalog ------------------------------------
+CATALOG_NAME     out.cat              # will be overridden
+CATALOG_TYPE     FITS_LDAC
+PARAMETERS_NAME  default.param        # path supplied by wrapper
+
+#------------------------------- Extraction ----------------------------------
+DETECT_TYPE      CCD
+DETECT_MINAREA   5
+DETECT_THRESH    1.5
+ANALYSIS_THRESH  1.5
+FILTER           Y
+FILTER_NAME      default.conv         # supplied by wrapper (Gaussian)
+DEBLEND_NTHRESH  32
+DEBLEND_MINCONT  0.0001
+CLEAN            Y
+CLEAN_PARAM      1.0
+MASK_TYPE        CORRECT
+
+#------------------------------ Photometry -----------------------------------
+PHOT_APERTURES   3,5,10
+PHOT_AUTOPARAMS  2.5,3.5
+PHOT_PETROPARAMS 2.0,3.5
+SATUR_LEVEL      50000.0              # OVERRIDDEN per-band by wrapper
+MAG_ZEROPOINT    25.0                 # OVERRIDDEN per-band by wrapper
+MAG_GAMMA        4.0
+GAIN             1.0                  # OVERRIDDEN per-band by wrapper
+PIXEL_SCALE      0.030                # OVERRIDDEN per-band by wrapper
+
+#------------------------- Star/Galaxy Separation ----------------------------
+SEEING_FWHM      0.07                 # OVERRIDDEN per-band by wrapper (arcsec)
+STARNNW_NAME     default.nnw          # supplied by wrapper
+
+#------------------------------ Background -----------------------------------
+BACK_SIZE        128
+BACK_FILTERSIZE  3
+
+#------------------------------ Check images ---------------------------------
+CHECKIMAGE_TYPE  NONE
+CHECKIMAGE_NAME  check.fits
+
+#--------------------- Memory (change with caution!) -------------------------
+MEMORY_OBJSTACK  3000
+MEMORY_PIXSTACK  300000
+MEMORY_BUFSIZE   1024
+
+#----------------------------- Miscellaneous ---------------------------------
+VERBOSE_TYPE     QUIET
+WRITE_XML        N
+NTHREADS         0                    # 0 = auto
+
+#---------------------- PSF photometry (PSFEx-supplied) ----------------------
+PSF_NAME         psf.psf              # set by wrapper after PSFEx pass
+PSF_NMAX         1
+PATTERN_TYPE     RINGS-HARMONIC
