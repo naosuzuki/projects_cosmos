@@ -1,8 +1,19 @@
 #!/usr/bin/env python
 """
-29_step2_ps1_image_download.py — Step 2.3c: download PS1 DR2 stack
+29_step2_ps1_image_download.py — Step 2.3c: download PS1 stack
 imaging (unconvolved warps + masks + weights) over the Euclid VIS
 polygon or the 3-way subset.
+
+Image-release vs catalog-release nuance:
+  PS1 only ever produced one set of stack images — the rings.v3
+  projection built for DR1 in 2016.  DR2 (2019) reprocessed the
+  CATALOGS (Gaia-DR2-tied astrometry, per-detector zeropoints, the
+  ForcedMeanObject table) on the SAME pixels.  So strictly:
+    - 27_ pulled DR2 catalog (MeanObjectView)
+    - 29_ pulls DR1 rings.v3 stacks — the images the DR2 catalog
+      was measured from.
+  Nobody has "DR2 stacks" because they don't exist as a separate
+  product.
 
 Why stacks and not per-source cutouts:
   185 796 PS1 sources × 5 bands × 240" cutouts would be ~46 GB of
@@ -318,6 +329,7 @@ def main():
     # Persist a summary meta.json
     meta = {
         'created_utc_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'image_release':   'PS1 DR1 rings.v3 stacks (same pixels DR2 catalog was measured from)',
         'scope':           args.scope,
         'bands':           args.bands,
         'aux_types':       args.aux,
