@@ -44,13 +44,18 @@ COLOURS = {'HST':  '#d62728',   # red
            'VIS':  '#2ca02c',   # green
            'NISP': '#ff7f0e'}   # orange
 
-# Drawing: VIS in the back as a thick solid line; NISP in front as a
-# dashed line on top, so VIS green shows through the gaps in the dashes
-# and both Euclid outlines are visible simultaneously.
-DRAW_ORDER  = ['HST', 'JWST', 'VIS', 'NISP']
+# Drawing:
+#   - VIS in the back as a thick solid line; NISP in front as a dashed
+#     line so VIS green shows through the gaps and both Euclid outlines
+#     are visible.
+#   - JWST as a solid blue line in the back; HST as a dashed red line
+#     on top, so both HST and JWST outlines are visible at the overlap
+#     (after adding the Apr-23 A-tiles HST and JWST are nearly
+#     coincident — within ~0.0003 deg² of each other).
+DRAW_ORDER  = ['JWST', 'HST', 'VIS', 'NISP']
 WIDTHS      = {'HST': 1.8, 'JWST': 1.8, 'VIS': 3.6, 'NISP': 1.8}
 ALPHAS      = {'HST': 1.0, 'JWST': 1.0, 'VIS': 1.0, 'NISP': 1.0}
-LINESTYLES  = {'HST': '-',  'JWST': '-',  'VIS': '-',  'NISP': '--'}
+LINESTYLES  = {'HST': '--', 'JWST': '-', 'VIS': '-',  'NISP': '--'}
 
 
 def _row_polygon(row) -> Polygon:
@@ -139,8 +144,9 @@ def main():
         xs, ys = zip(*p.exterior.coords)
         ax.fill(xs, ys, color='#555', alpha=0.45, zorder=2)
 
-    # Per-mission outlines in the documented order (NISP drawn last on top)
-    z = {'HST': 3, 'JWST': 3, 'VIS': 4, 'NISP': 5}
+    # Per-mission outlines in the documented order
+    # zorder: JWST behind HST behind VIS behind NISP
+    z = {'JWST': 3, 'HST': 4, 'VIS': 5, 'NISP': 6}
     for name in DRAW_ORDER:
         draw_geom(ax, footprints[name],
                   color=COLOURS[name], lw=WIDTHS[name], alpha=ALPHAS[name],
