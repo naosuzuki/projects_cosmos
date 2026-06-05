@@ -1,0 +1,14 @@
+CONV NORM
+# 9x9 top-hat convolution kernel used in the Galametz+ 2013 CANDELS &
+# Shuntov+ 2025 COSMOS-Web "cold" detection pass.  Heavy smoothing
+# merges substructure → bright extended galaxies are detected as
+# single sources instead of being shredded.
+1 1 1 1 1 1 1 1 1
+1 1 1 1 1 1 1 1 1
+1 1 1 1 1 1 1 1 1
+1 1 1 1 1 1 1 1 1
+1 1 1 1 1 1 1 1 1
+1 1 1 1 1 1 1 1 1
+1 1 1 1 1 1 1 1 1
+1 1 1 1 1 1 1 1 1
+1 1 1 1 1 1 1 1 1

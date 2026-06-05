@@ -1,0 +1,70 @@
+# SExtractor config — JWST NIRCam χ² detection image, COLD pass.
+#
+# Adopts Shuntov+ 2025 (COSMOS2025 / COSMOS-Web galaxy catalog,
+# A&A 2025) parameters where specified, with CANDELS Galametz+ 2013
+# (ApJS 207, 24) values filling unspecified entries.  Heavy smoothing
+# + large background mesh + low deblending → detects bright, extended
+# galaxies cleanly without shredding them into substructures.
+#
+# Input image is expected to be the χ²+ stack of the 4 NIRCam bands
+# (F115W + F150W + F277W + F444W), each PSF-homogenized to F444W and
+# multiplied by √WHT (noise-equalized).  Negative pixels truncated to
+# zero before stacking.
+#
+# Output: cold catalog FITS_LDAC + cold segmentation map.
+
+#-------------------------------- Catalog ------------------------------------
+CATALOG_TYPE     FITS_LDAC
+PARAMETERS_NAME  default_pass1.param    # detection-only columns + VIGNET
+
+#------------------------------- Extraction ----------------------------------
+DETECT_TYPE      CCD
+DETECT_MINAREA   15                     # Shuntov 2025
+DETECT_THRESH    4.0                    # 4σ on χ²+ image, Shuntov 2025
+ANALYSIS_THRESH  5.0                    # CANDELS Galametz 2013
+FILTER           Y
+FILTER_NAME      tophat_9.0_9x9.conv    # Shuntov + CANDELS — heavy smoothing
+DEBLEND_NTHRESH  64                     # Shuntov 2025
+DEBLEND_MINCONT  0.001                  # Shuntov 2025
+CLEAN            Y
+CLEAN_PARAM      2.0                    # Shuntov 2025
+MASK_TYPE        CORRECT
+
+#------------------------------ Weighting ------------------------------------
+WEIGHT_TYPE      NONE                   # χ² image is already noise-normalized
+WEIGHT_GAIN      N
+
+#------------------------------ Photometry -----------------------------------
+# χ² image is unitless; ZP is irrelevant for the detection catalog.
+PHOT_APERTURES   10,17,33
+PHOT_AUTOPARAMS  2.5,3.5
+PHOT_PETROPARAMS 2.0,3.5
+SATUR_LEVEL      1.0e30
+MAG_ZEROPOINT    30.0                   # nominal — for sorting only
+MAG_GAMMA        4.0
+GAIN             0.0
+PIXEL_SCALE      0.030
+
+#------------------------- Star/Galaxy Separation ----------------------------
+SEEING_FWHM      0.145                  # F444W broad PSF (target of homog.)
+STARNNW_NAME     default.nnw
+
+#------------------------------ Background -----------------------------------
+BACK_SIZE        256                    # CANDELS Galametz 2013 — large mesh
+BACK_FILTERSIZE  9                      # CANDELS
+BACKPHOTO_TYPE   LOCAL
+BACKPHOTO_THICK  100                    # CANDELS
+
+#------------------------------ Check images ---------------------------------
+CHECKIMAGE_TYPE  SEGMENTATION           # cold segmentation drives the merge
+CHECKIMAGE_NAME  seg_cold.fits
+
+#--------------------- Memory ------------------------------------------------
+MEMORY_OBJSTACK  10000
+MEMORY_PIXSTACK  2000000
+MEMORY_BUFSIZE   4096
+
+#----------------------------- Miscellaneous ---------------------------------
+VERBOSE_TYPE     NORMAL
+WRITE_XML        N
+NTHREADS         0
