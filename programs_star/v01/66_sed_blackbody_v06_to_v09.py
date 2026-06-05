@@ -41,7 +41,7 @@ warnings.filterwarnings('ignore')
 ROOT = Path('/Users/suzuki/github/projects_cosmos')
 OUT  = ROOT / 'csvfiles_star'
 FILTER_CACHE = OUT / 'sed_filters'
-CW_PATH = '/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits'
+CW_PATH = '/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits'
 
 H = 6.62607015e-27; C_AA = 2.99792458e18; K = 1.380649e-16
 

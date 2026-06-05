@@ -367,7 +367,7 @@ def main():
     # is_agn_qso from v02 PM catalogs (which carry the flag) +
     # direct CW AGN/QSO lookup for sources without JWST detection.
     from astropy.io import fits
-    CW_PATH = '/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits'
+    CW_PATH = '/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits'
     with fits.open(CW_PATH) as hdul:
         photo = hdul['PHOTOMETRY HOTCOLD AND SE++'].data
         lephare = hdul['LEPHARE'].data

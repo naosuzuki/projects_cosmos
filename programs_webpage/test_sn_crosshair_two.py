@@ -35,8 +35,8 @@ OUT_DIR = HTMLS_DIR / "_crosshair_test"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 CSV_PATH = Path("/Users/suzuki/github/projects_cosmos/csvfiles/sn_test_2sources_v2.csv")
-LEPHARE_FITS = Path("/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1_lephare.fits")
-MASTER_FITS  = Path("/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits")
+LEPHARE_FITS = Path("/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1_lephare.fits")
+MASTER_FITS  = Path("/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits")
 
 # Per-source cutout selection
 #   "list_name" -> filename prefix ("sn_<list>_<seqstr>_*.png")

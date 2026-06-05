@@ -34,8 +34,8 @@ EUCLID_PNG = Path("/Volumes/exdisk1/data/Euclid/COSMOS_DR1_png")
 OUT_DIR = HTMLS_DIR / "_crosshair_test"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-LEPHARE_FITS = Path("/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1_lephare.fits")
-MASTER_FITS  = Path("/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits")
+LEPHARE_FITS = Path("/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1_lephare.fits")
+MASTER_FITS  = Path("/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits")
 
 # Crosshair / label parameters (same as test_sn_crosshair.py)
 ARM_INNER = 0.020

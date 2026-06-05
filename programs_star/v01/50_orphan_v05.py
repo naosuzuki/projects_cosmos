@@ -309,7 +309,7 @@ def load_galaxy_catalog_veto():
     print('Loading Euclid MER, HST ACS, COSMOS-Web, COSMOS2020 catalogs for galaxy veto...')
     from astropy.table import Table
 
-    eu = Table.read(CATDIR / 'cosmos_mer_dr1r1_minimal.fits')
+    eu = Table.read(CATDIR / 'Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits')
     eu_df = pd.DataFrame({
         'ra': _native(eu['right_ascension']),
         'dec': _native(eu['declination']),
@@ -317,7 +317,7 @@ def load_galaxy_catalog_veto():
         'fwhm_px': _native(eu['fwhm']),
         'ellip': _native(eu['ellipticity']),
     })
-    ac = Table.read(CATDIR / 'cosmos_acs_iphot_200709.fits')
+    ac = Table.read(CATDIR / 'HST/COSMOS/cosmos_acs_iphot_200709.fits')
     a = _native(ac['a_image']); b = _native(ac['b_image'])
     ac_df = pd.DataFrame({
         'ra': _native(ac['ra']),
@@ -327,7 +327,7 @@ def load_galaxy_catalog_veto():
         'fwhm_as': _native(ac['fwhm_image']) * 0.030,
         'ellip': 1.0 - b / np.where(a > 0, a, np.nan),
     })
-    with fits.open(CATDIR / 'COSMOSWeb_mastercatalog_v1.1.fits', memmap=True) as h:
+    with fits.open(CATDIR / 'JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits', memmap=True) as h:
         d = h[1].data
         cw_df = pd.DataFrame({
             'ra': _native(d['ra']),
@@ -337,7 +337,7 @@ def load_galaxy_catalog_veto():
             'sersic_n': _native(d['sersic']),
             'axratio': _native(d['axratio_sersic']),
         })
-    with fits.open(CATDIR / 'COSMOS2020_FARMER_R1_v2.2_p3.fits.gz', memmap=True) as h:
+    with fits.open(CATDIR / 'COSMOS2020/COSMOS/COSMOS2020_FARMER_R1_v2.2_p3.fits.gz', memmap=True) as h:
         d = h[1].data
         c20_df = pd.DataFrame({
             'ra': _native(d['ALPHA_J2000']),

@@ -55,7 +55,7 @@ OUT  = ROOT / 'csvfiles_star'
 HTML = ROOT / 'htmls' / 'star_v01'
 HTML.mkdir(parents=True, exist_ok=True)
 
-CW_PATH = '/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits'
+CW_PATH = '/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits'
 
 TAG = {
     'HST':         'hst',

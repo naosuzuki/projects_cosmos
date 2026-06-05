@@ -207,8 +207,8 @@ _Z_LOOKUP   = None # id -> zfinal (LEPHARE), built once on first lookup
 
 
 # Catalog paths for host-z lookup (row-matched MASTER + LEPHARE).
-MASTER_FITS  = "/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits"
-LEPHARE_FITS = "/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1_lephare.fits"
+MASTER_FITS  = "/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits"
+LEPHARE_FITS = "/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1_lephare.fits"
 
 
 def _open_cached(path):

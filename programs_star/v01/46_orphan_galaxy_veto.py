@@ -63,7 +63,7 @@ CW_FWHM_GAL_FACTOR  = 1.5      # fwhm > 1.5 × PSF → extended in CW
 
 def load_eu():
     print('Loading Euclid MER DR1...')
-    eu = Table.read(CATDIR / 'cosmos_mer_dr1r1_minimal.fits')
+    eu = Table.read(CATDIR / 'Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits')
     return pd.DataFrame({
         'ra':            np.asarray(eu['right_ascension']),
         'dec':           np.asarray(eu['declination']),
@@ -78,7 +78,7 @@ def load_eu():
 
 def load_hst_acs():
     print('Loading HST ACS i-phot...')
-    ac = Table.read(CATDIR / 'cosmos_acs_iphot_200709.fits')
+    ac = Table.read(CATDIR / 'HST/COSMOS/cosmos_acs_iphot_200709.fits')
     a = np.asarray(ac['a_image']); b = np.asarray(ac['b_image'])
     ellip = 1.0 - b / np.where(a > 0, a, np.nan)
     return pd.DataFrame({
@@ -95,7 +95,7 @@ def load_hst_acs():
 
 def load_cw():
     print('Loading CW v1.1 ext 1 PHOT...')
-    with fits.open(CATDIR / 'COSMOSWeb_mastercatalog_v1.1.fits', memmap=True) as h:
+    with fits.open(CATDIR / 'JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits', memmap=True) as h:
         d = h[1].data
         return pd.DataFrame({
             'ra':              np.asarray(d['ra']),
@@ -112,7 +112,7 @@ def load_cw():
 
 def load_c2020():
     print('Loading COSMOS2020 Farmer...')
-    with fits.open(CATDIR / 'COSMOS2020_FARMER_R1_v2.2_p3.fits.gz', memmap=True) as h:
+    with fits.open(CATDIR / 'COSMOS2020/COSMOS/COSMOS2020_FARMER_R1_v2.2_p3.fits.gz', memmap=True) as h:
         d = h[1].data
         return pd.DataFrame({
             'ra':            np.asarray(d['ALPHA_J2000']),

@@ -52,7 +52,7 @@ ROOT = Path('/Users/suzuki/github/projects_cosmos')
 OUT  = ROOT / 'csvfiles_star'
 HTML = ROOT / 'htmls' / 'pm_v01'
 HTML.mkdir(parents=True, exist_ok=True)
-CW_PATH = '/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits'
+CW_PATH = '/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits'
 
 # (combo_name, mission1, mission2, tag1, tag2, ep1, ep2)
 # tag is the short suffix used in the refined catalog (e.g. 'hst').

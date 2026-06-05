@@ -6,11 +6,11 @@ Match every DAO detection to its mission's published catalog within
 ONE MOSAIC PIXEL.  Any DAO detection without a catalog match is dropped
 (not a real object).  The catalog ID becomes the primary key.
 
-  HST F814W  → cosmos_acs_iphot_200709.fits      (1 ACS pixel  = 0.030″)
-  JWST       → COSMOSWeb_mastercatalog_v1.1.fits (1 NIRCam pix = 0.030″)
+  HST F814W  → HST/COSMOS/cosmos_acs_iphot_200709.fits      (1 ACS pixel  = 0.030″)
+  JWST       → JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits (1 NIRCam pix = 0.030″)
                (one row per CW id, with up to 4 band DAO sets per row)
-  Euclid VIS → cosmos_mer_dr1r1_minimal.fits     (1 VIS pixel  = 0.100″)
-  Euclid NISP→ cosmos_mer_dr1r1_minimal.fits     (1 NISP pix   = 0.100″)
+  Euclid VIS → Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits     (1 VIS pixel  = 0.100″)
+  Euclid NISP→ Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits     (1 NISP pix   = 0.100″)
                (one row per MER id with up to 3 NIR-Y/J/H DAO sets)
 
 Outputs:
@@ -85,7 +85,7 @@ def step3_hst():
     dao['snr'] = dao['peak'] / dao['sky_std']
     print(f'  DAO F814W detections: {len(dao):,}')
 
-    cat = Table.read(CAT_DIR / 'cosmos_acs_iphot_200709.fits')
+    cat = Table.read(CAT_DIR / 'HST/COSMOS/cosmos_acs_iphot_200709.fits')
     print(f'  ACS i-phot catalog : {len(cat):,}')
 
     cat_ra  = _native(cat['ra'])
@@ -138,7 +138,7 @@ def step3_hst():
 def step3_jwst():
     print('\n========== JWST (F115/F150/F277/F444 → CW v1.1) ==========')
 
-    with fits.open(CAT_DIR / 'COSMOSWeb_mastercatalog_v1.1.fits', memmap=True) as h:
+    with fits.open(CAT_DIR / 'JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits', memmap=True) as h:
         c = h[1].data
         # Extract just the columns we need (avoid copying the whole 287-col table)
         cw_id   = _native(c['id'])
@@ -241,7 +241,7 @@ def step3_euclid_vis():
     dao['snr'] = dao['peak'] / dao['sky_std']
     print(f'  DAO VIS detections: {len(dao):,}')
 
-    cat = Table.read(CAT_DIR / 'cosmos_mer_dr1r1_minimal.fits')
+    cat = Table.read(CAT_DIR / 'Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits')
     print(f'  MER catalog       : {len(cat):,}')
 
     cat_id  = _native(cat['object_id'])
@@ -297,7 +297,7 @@ def step3_euclid_vis():
 def step3_euclid_nisp():
     print('\n========== Euclid NISP (Y/J/H → MER) ==========')
 
-    cat = Table.read(CAT_DIR / 'cosmos_mer_dr1r1_minimal.fits')
+    cat = Table.read(CAT_DIR / 'Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits')
     cat_id   = _native(cat['object_id'])
     cat_ra   = _native(cat['right_ascension'])
     cat_dec  = _native(cat['declination'])

@@ -83,7 +83,7 @@ def step3_hst():
     dao['snr'] = dao['peak'] / dao['sky_std']
     print(f'  DAO F814W detections: {len(dao):,}')
 
-    cat = Table.read(CAT_DIR / 'cosmos_acs_iphot_200709.fits')
+    cat = Table.read(CAT_DIR / 'HST/COSMOS/cosmos_acs_iphot_200709.fits')
     print(f'  ACS i-phot catalog : {len(cat):,}')
 
     cat_ra  = _native(cat['ra'])
@@ -182,7 +182,7 @@ def step3_hst():
 def step3_jwst():
     print('\n========== JWST (F115/F150/F277/F444 → CW v1.1) ==========')
 
-    with fits.open(CAT_DIR / 'COSMOSWeb_mastercatalog_v1.1.fits', memmap=True) as h:
+    with fits.open(CAT_DIR / 'JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits', memmap=True) as h:
         c = h[1].data
         # Extract just the columns we need (avoid copying the whole 287-col table)
         cw_id   = _native(c['id'])
@@ -311,7 +311,7 @@ def step3_euclid_vis():
     dao['snr'] = dao['peak'] / dao['sky_std']
     print(f'  DAO VIS detections: {len(dao):,}')
 
-    cat = Table.read(CAT_DIR / 'cosmos_mer_dr1r1_minimal.fits')
+    cat = Table.read(CAT_DIR / 'Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits')
     print(f'  MER catalog       : {len(cat):,}')
 
     cat_id  = _native(cat['object_id'])
@@ -367,7 +367,7 @@ def step3_euclid_vis():
 def step3_euclid_nisp():
     print('\n========== Euclid NISP (Y/J/H → MER) ==========')
 
-    cat = Table.read(CAT_DIR / 'cosmos_mer_dr1r1_minimal.fits')
+    cat = Table.read(CAT_DIR / 'Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits')
     cat_id   = _native(cat['object_id'])
     cat_ra   = _native(cat['right_ascension'])
     cat_dec  = _native(cat['declination'])

@@ -53,7 +53,7 @@ PANEL_LABELS = {
 SOURCE_ID = "318858"
 
 # Photo-z stamped on every panel.  Source = lephare zfinal from
-# COSMOSWeb_mastercatalog_v1.1_lephare.fits (the COSMOS2025 / Shuntov+25
+# JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1_lephare.fits (the COSMOS2025 / Shuntov+25
 # LePHARE photo-z catalog built on the SE++ 34-band model photometry).
 # In production this is looked up per source from the lephare catalog.
 LEPHARE_Z = 0.5763

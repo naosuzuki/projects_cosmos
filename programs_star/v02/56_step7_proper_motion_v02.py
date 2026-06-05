@@ -55,7 +55,7 @@ OUT  = ROOT / 'csvfiles_star'
 HTML = ROOT / 'htmls' / 'pm_v01'
 HTML.mkdir(parents=True, exist_ok=True)
 
-CW_PATH = '/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits'
+CW_PATH = '/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits'
 
 # Each entry: (combo_name, mission1, mission2, tag1, tag2, epoch1, epoch2)
 COMBOS_PM = [

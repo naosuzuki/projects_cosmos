@@ -43,7 +43,7 @@ def flux_to_mag(flux, fluxerr):
 
 # ---------------- HST ACS i-phot ----------------
 def load_hst():
-    path = CATDIR / 'cosmos_acs_iphot_200709.fits'
+    path = CATDIR / 'HST/COSMOS/cosmos_acs_iphot_200709.fits'
     print(f'\n[HST]  reading {path.name}')
     with fits.open(path, memmap=True) as h:
         d = h[1].data
@@ -70,7 +70,7 @@ def load_hst():
 
 # ---------------- Euclid MER DR1 ----------------
 def load_euclid():
-    path = CATDIR / 'cosmos_mer_dr1r1_minimal.fits'
+    path = CATDIR / 'Euclid/COSMOS/cosmos_mer_dr1r1_minimal.fits'
     print(f'\n[Euclid]  reading {path.name}')
     with fits.open(path, memmap=True) as h:
         d = h[1].data
@@ -103,7 +103,7 @@ def load_euclid():
 
 # ---------------- JWST COSMOS-Web v1.1 ----------------
 def load_jwst():
-    path = CATDIR / 'COSMOSWeb_mastercatalog_v1.1.fits'
+    path = CATDIR / 'JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits'
     print(f'\n[JWST CW]  reading {path.name} (ext 1 PHOT + ext 2 LEPHARE)')
     with fits.open(path, memmap=True) as h:
         d  = h[1].data
@@ -144,7 +144,7 @@ def load_jwst():
 
 # ---------------- COSMOS2020 Farmer ----------------
 def load_cosmos2020():
-    path = CATDIR / 'COSMOS2020_FARMER_R1_v2.2_p3.fits.gz'
+    path = CATDIR / 'COSMOS2020/COSMOS/COSMOS2020_FARMER_R1_v2.2_p3.fits.gz'
     print(f'\n[COSMOS2020]  reading {path.name}')
     with fits.open(path, memmap=True) as h:
         d = h[1].data

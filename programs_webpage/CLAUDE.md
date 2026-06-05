@@ -675,7 +675,7 @@ directly attacks the data-starvation wall that capped LOO recovery at 8/17.
 `fits_lookup_v03` within 2″, yet are well inside the JWST+HST footprint.
 
 **Trace (level by level):**
-- Raw `COSMOSWeb_mastercatalog_v1.1.fits` (784,016 src): all 3 PRESENT at
+- Raw `JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits` (784,016 src): all 3 PRESENT at
   correct RA/Dec.
 - `master_or_catalog_v03`: all 3 ABSENT.
 - → dropped in `programs_star/52_step3_catalog_match_v03.py`.
@@ -703,7 +703,7 @@ step-3 → master → fits_lookup, then re-derive the v07 inference pool.
 Versioning of the rebuilt catalog: NOT yet decided by the user.
 
 ### Pipeline / paths (for the rebuild)
-- Raw catalog: `/Volumes/exdisk1/data/catalog/COSMOSWeb_mastercatalog_v1.1.fits`
+- Raw catalog: `/Volumes/exdisk1/data/catalog/JWST/COSMOS/COSMOSWeb_mastercatalog_v1.1.fits`
   (id, ra, dec, flag_star, flag_blend, fwhm, sersic, axratio, radius_sersic,
    mag_auto_<band>, snr_<band> for F115/F150/F277/F444).
 - Step-3: `programs_star/52_step3_catalog_match_v03.py` (JWST section ~L185-275).
