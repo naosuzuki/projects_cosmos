@@ -39,7 +39,7 @@ WEIGHT_GAIN      N
 PHOT_APERTURES   10,17,33
 PHOT_AUTOPARAMS  2.5,3.5
 PHOT_PETROPARAMS 2.0,3.5
-SATUR_LEVEL      1.0e30
+SATUR_LEVEL      1.0e9
 MAG_ZEROPOINT    30.0                   # nominal — for sorting only
 MAG_GAMMA        4.0
 GAIN             0.0
