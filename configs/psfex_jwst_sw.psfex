@@ -1,0 +1,65 @@
+# PSFEx config — JWST NIRCam SHORT-wavelength channels (F115W, F150W).
+#
+# Parameters follow the COSMOS-Web NIRCam PSF construction of
+# Tanaka et al. 2023 (arXiv:2309.03266, "AGNs and Host Galaxies in
+# COSMOS-Web I"), which builds PSF models on the SAME COSMOS-Web
+# 30 mas mosaics we use.  Validated on JWST F115W tile A4:
+# χ² = 1.10 (vs 1.75 with a too-small 25 px stamp that truncated
+# the diffraction spikes).
+#
+# Key choices (Tanaka+2023):
+#   PSF model size  : 201 px for SW (and HST ACS F814W)
+#   oversampling    : 2  (PSF_SAMPLING 0.5 — required, NIRCam SW is
+#                         undersampled below 2 µm)
+#   basis           : PIXEL_AUTO
+#   spatial model   : 1st-order (linear) polynomial — few stars/tile
+#   selection       : SNR_WIN > 100, FLAGS < 2, ELONGATION < 1.5,
+#                     IMAFLAGS_ISO = 0, FLUX_RADIUS 2.5σ clip
+#                     (CLASS_STAR > 0.8 applied upstream as a pre-cut)
+#
+# Requires VIGNET(101,101) in the SExtractor pass-1 catalog
+# (101 native px × oversample 2 ≈ 201 model px).
+
+#-------------------------------- PSF model ---------------------------------
+BASIS_TYPE      PIXEL_AUTO
+BASIS_NUMBER    20
+PSF_SAMPLING    0.5            # 2x oversampled
+PSF_ACCURACY    0.01
+PSF_SIZE        201,201        # model stamp in oversampled px
+CENTER_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PHOTFLUX_KEY    FLUX_APER(1)
+PHOTFLUXERR_KEY FLUXERR_APER(1)
+
+#----------------------------- PSF variability ------------------------------
+PSFVAR_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PSFVAR_GROUPS   1,1
+PSFVAR_DEGREES  1              # linear spatial model (Tanaka+2023)
+
+#----------------------------- Sample selection -----------------------------
+SAMPLE_AUTOSELECT  Y
+SAMPLEVAR_TYPE     SEEING
+SAMPLE_FWHMRANGE   1.5,4.0     # SW stellar locus (pixels)
+SAMPLE_VARIABILITY 0.2
+SAMPLE_MINSN       100.0       # Tanaka+2023 SNR_WIN > 100
+SAMPLE_MAXELLIP    0.2         # ~ ELONGATION < 1.5
+# 0x00fc rejects FLAGS bits 4(saturated),8(edge),16,... but ALLOWS
+# bit 1(neighbor) and bit 2(deblend).  The default 0x00fe rejects the
+# deblend bit, which on JWST throws away every bright star whose own
+# diffraction spikes were detected and deblended — exactly the high-SNR
+# stars needed to constrain the spike+wing model.  Validated on F115W
+# A4: keeps 334 spike stars (vs 155), PSF model now captures the
+# diffraction spikes.  Saturated stars are excluded UPSTREAM by a
+# masked-core check (central pixels == 0 in the i2d), since the JWST
+# pipeline masks the flat-topped saturated cores rather than setting
+# the SExtractor SATUR flag.
+SAMPLE_FLAGMASK    0x00fc
+
+#----------------------------- Output catalog -------------------------------
+OUTCAT_TYPE        FITS_LDAC
+
+#------------------------------ Check-Images --------------------------------
+CHECKPLOT_DEV       NULL
+CHECKIMAGE_TYPE     NONE
+WRITE_XML           N
+VERBOSE_TYPE        QUIET
+NTHREADS            0

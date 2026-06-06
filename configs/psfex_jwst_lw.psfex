@@ -1,0 +1,48 @@
+# PSFEx config — JWST NIRCam LONG-wavelength channels (F277W, F444W).
+#
+# Sibling of psfex_jwst_sw.psfex; follows Tanaka et al. 2023
+# (arXiv:2309.03266) for the COSMOS-Web 30 mas mosaics.  LW differs
+# from SW in two ways:
+#   PSF model size : 301 px (vs 201 for SW) — the LW PSF + its
+#                    diffraction spikes are physically larger
+#   FWHM range     : 2-6 px (vs 1.5-4 for SW) — broader stellar locus
+#
+# Requires VIGNET(151,151) in the SExtractor pass-1 catalog
+# (151 native px × oversample 2 ≈ 301 model px).
+
+#-------------------------------- PSF model ---------------------------------
+BASIS_TYPE      PIXEL_AUTO
+BASIS_NUMBER    20
+PSF_SAMPLING    0.5            # 2x oversampled
+PSF_ACCURACY    0.01
+PSF_SIZE        301,301        # LW model stamp (oversampled px)
+CENTER_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PHOTFLUX_KEY    FLUX_APER(1)
+PHOTFLUXERR_KEY FLUXERR_APER(1)
+
+#----------------------------- PSF variability ------------------------------
+PSFVAR_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PSFVAR_GROUPS   1,1
+PSFVAR_DEGREES  1              # linear spatial model (Tanaka+2023)
+
+#----------------------------- Sample selection -----------------------------
+SAMPLE_AUTOSELECT  Y
+SAMPLEVAR_TYPE     SEEING
+SAMPLE_FWHMRANGE   2.0,6.0     # LW stellar locus (pixels)
+SAMPLE_VARIABILITY 0.2
+SAMPLE_MINSN       100.0
+SAMPLE_MAXELLIP    0.2
+# 0x00fc allows neighbor(1)+deblend(2), rejects saturated(4)+edge(8)+...
+# Keeps bright diffraction-spike stars; saturated stars excluded
+# upstream by the masked-core check.  See psfex_jwst_sw.psfex.
+SAMPLE_FLAGMASK    0x00fc
+
+#----------------------------- Output catalog -------------------------------
+OUTCAT_TYPE        FITS_LDAC
+
+#------------------------------ Check-Images --------------------------------
+CHECKPLOT_DEV       NULL
+CHECKIMAGE_TYPE     NONE
+WRITE_XML           N
+VERBOSE_TYPE        QUIET
+NTHREADS            0

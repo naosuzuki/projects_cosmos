@@ -1,0 +1,232 @@
+#!/usr/bin/env python
+"""
+54_step3a_build_psf_model.py — build the per-band empirical PSF model
+for v04 Step 3a, using the validated COSMOS-Web / Tanaka+2023 recipe
+and our star selection (keep diffraction-spike stars, exclude
+saturated and artifact detections).
+
+Validated on JWST F115W tile A4 (see the pilot diagnostics in
+/Volumes/exdisk1/data/photometry_v04/pilot/):
+  - PSF model: PSF_SIZE 201 (SW) / 301 (LW) oversampled 2×, PIXEL_AUTO,
+    linear spatial model, SAMPLE_MINSN 100 (Tanaka+2023, arXiv:2309.03266)
+  - PSF model now captures the NIRCam diffraction spikes (χ²≈1.66 on
+    the high-SNR sample; a spike-LESS FLAGS<2 model gave a misleadingly
+    lower 1.10 because it omitted the bright stars where spikes matter)
+
+Star selection (per band):
+  CLASS_STAR > 0.8
+  SNR_WIN    > 100
+  ELONGATION < 1.5
+  FWHM_IMAGE > 0                              (reject fit-failures)
+  0.7*locus < FLUX_RADIUS < locus + 2.5σ      (artifact-cut floor +
+                                               stellar-locus ceiling;
+                                               locus = median FR of the
+                                               CLASS_STAR/SNR/ELON base)
+  masked_core == 0                            (NOT saturated — JWST i2d
+                                               masks the flat-topped
+                                               saturated cores to 0;
+                                               this is the saturation
+                                               signature, not FLAGS&4)
+  NO FLAGS<2 cut                              (keep bright stars whose
+                                               own diffraction spikes
+                                               were deblended)
+PSFEx then runs with SAMPLE_FLAGMASK 0x00fc (allow neighbor+deblend,
+reject saturated+edge bits) + SAMPLE_AUTOSELECT for final clipping.
+
+Procedure:
+  1. SExtractor pass-1 on the band SCI (big VIGNET: 101 SW / 151 LW)
+  2. compute stellar locus + apply the selection above (the masked-core
+     test reads the SCI pixels at each centroid)
+  3. write a filtered FITS_LDAC star catalog (in-place row filter to
+     preserve the LDAC structure incl. VIGNET TDIM)
+  4. run PSFEx (psfex_jwst_sw.psfex / _lw.psfex) → <band>.psf model
+  5. write a star-selection diagnostic JSON
+
+Outputs to /Volumes/exdisk1/data/photometry_v04/<instrument>/<tile>/psf/.
+"""
+from __future__ import annotations
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+from astropy.io import fits
+
+PROJECT  = Path('/Users/suzuki/github/projects_cosmos')
+CONFIGS  = PROJECT / 'configs'
+JWST_DIR = Path('/Volumes/exdisk1/data/JWST/COSMOS_v0.8')
+WORK     = Path('/Volumes/exdisk1/data/photometry_v04')
+
+# SW = short-wavelength (F115W, F150W); LW = long (F277W, F444W)
+SW_BANDS = {'f115w', 'f150w'}
+LW_BANDS = {'f277w', 'f444w'}
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument('--instrument', default='jwst_nircam_f115w',
+                   help='instrument key matching configs/<instrument>.sex')
+    p.add_argument('--tile', default='A4')
+    p.add_argument('--filter', default='f115w',
+                   choices=['f115w', 'f150w', 'f277w', 'f444w'])
+    p.add_argument('--core-box', type=int, default=5,
+                   help='central NxN box to test for masked (=0) pixels '
+                        '(saturation signature). Default 5.')
+    p.add_argument('--reuse-pass1', action='store_true',
+                   help='reuse existing pass-1 catalog if present')
+    return p.parse_args()
+
+
+def band_image(tile, band):
+    p = JWST_DIR / f'mosaic_nircam_{band}_COSMOS-Web_30mas_{tile}_v1.0_i2d.fits'
+    if not p.exists():
+        sys.exit(f'Missing tile image: {p}')
+    return p
+
+
+def zp_from_pixar(image):
+    with fits.open(image) as h:
+        for hdu in h:
+            if 'PIXAR_SR' in hdu.header:
+                return -2.5*np.log10(hdu.header['PIXAR_SR']*1e6) + 8.9
+    sys.exit('No PIXAR_SR for ZP')
+
+
+def main():
+    args = parse_args()
+    band = args.filter
+    chan = 'sw' if band in SW_BANDS else 'lw'
+    out  = WORK / args.instrument / args.tile / 'psf'
+    out.mkdir(parents=True, exist_ok=True)
+    img  = band_image(args.tile, band)
+    zp   = zp_from_pixar(img)
+
+    print(f'Instrument : {args.instrument}   ({chan.upper()} channel)')
+    print(f'Tile/band  : {args.tile} / {band.upper()}   ZP_AB={zp:.4f}')
+    print(f'PSF config : psfex_jwst_{chan}.psfex   param: pass1_jwst_{chan}.param')
+
+    # ── 1. extract SCI+WHT single-HDU, run SExtractor pass 1 ──
+    with fits.open(img) as h:
+        sci = h['SCI'].data.astype(np.float32)
+        sci_hdr = h['SCI'].header
+        wht = h['WHT'].data.astype(np.float32)
+        wht_hdr = h['WHT'].header
+    sci_path = out / f'sci_{band}.fits'
+    wht_path = out / f'wht_{band}.fits'
+    fits.PrimaryHDU(sci, sci_hdr).writeto(sci_path, overwrite=True)
+    fits.PrimaryHDU(wht, wht_hdr).writeto(wht_path, overwrite=True)
+
+    cat1 = out / f'pass1_{band}.fits'
+    if not (args.reuse_pass1 and cat1.exists()):
+        print('\n── SExtractor pass 1 (detection + big VIGNET) ──', flush=True)
+        cmd = ['sex', str(sci_path),
+               '-c', str(CONFIGS / f'{args.instrument}.sex'),
+               '-CATALOG_NAME', str(cat1),
+               '-PARAMETERS_NAME', str(CONFIGS / f'pass1_jwst_{chan}.param'),
+               '-FILTER_NAME', str(CONFIGS / 'default.conv'),
+               '-STARNNW_NAME', str(CONFIGS / 'default.nnw'),
+               '-WEIGHT_IMAGE', str(wht_path),
+               '-MAG_ZEROPOINT', f'{zp:.4f}',
+               '-VERBOSE_TYPE', 'QUIET']
+        t0 = time.time()
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(r.stderr[-1500:], file=sys.stderr); sys.exit('SExtractor pass1 failed')
+        print(f'  wall {time.time()-t0:.1f}s')
+
+    # ── 2. star selection ──
+    print('\n── star selection ──', flush=True)
+    hcat = fits.open(cat1)
+    obj  = hcat[2].data
+    mag  = np.asarray(obj['MAG_AUTO'], float)
+    fr   = np.asarray(obj['FLUX_RADIUS'], float)
+    fwhm = np.asarray(obj['FWHM_IMAGE'], float)
+    cs   = np.asarray(obj['CLASS_STAR'], float)
+    snr  = np.asarray(obj['SNR_WIN'], float)
+    flg  = np.asarray(obj['FLAGS'], int)
+    elon = np.asarray(obj['ELONGATION'], float)
+    xx   = np.asarray(obj['X_IMAGE'], float)
+    yy   = np.asarray(obj['Y_IMAGE'], float)
+
+    # stellar locus from a clean base
+    base = (cs > 0.8) & (snr > 100) & (flg < 2) & (elon < 1.5) & (fr > 0)
+    med, std = np.median(fr[base]), np.std(fr[base])
+    cut = 0.7 * med
+
+    # masked-core (saturation) test on the SCI pixels
+    half = args.core_box // 2
+    ny, nx = sci.shape
+    xi = np.clip(np.round(xx).astype(int), half, nx-half-1)
+    yi = np.clip(np.round(yy).astype(int), half, ny-half-1)
+    masked_core = np.zeros(len(obj), int)
+    for k in range(len(obj)):
+        box = sci[yi[k]-half:yi[k]+half+1, xi[k]-half:xi[k]+half+1]
+        masked_core[k] = np.sum(box == 0)
+    saturated = masked_core > 0
+    edge = (flg & 8) > 0
+
+    star = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
+            & (fr > cut) & (fr < med + 2.5*std)
+            & (~saturated) & (~edge))
+    print(f'  stellar locus = {med:.3f} ± {std:.3f} px  (artifact cut {cut:.3f} px)')
+    print(f'  PSF stars selected : {star.sum()}')
+    print(f'    of which deblend-flagged (spike) : {(star & (flg >= 2)).sum()}')
+    print(f'  excluded saturated (masked core)   : {saturated.sum()}')
+    print(f'  min FLUX_RADIUS among stars        : {fr[star].min():.3f} px '
+          f'({"OK" if fr[star].min() > cut else "FAIL"} > cut {cut:.3f})')
+
+    # ── 3. write filtered LDAC (in-place row filter preserves TDIM) ──
+    star_cat = out / f'stars_{band}.fits'
+    hcat[2].data = obj[star]
+    hcat.writeto(star_cat, overwrite=True)
+    print(f'  wrote {star_cat.name} ({star.sum()} stars)')
+
+    # ── 4. PSFEx ──
+    print('\n── PSFEx ──', flush=True)
+    cmd = ['psfex', str(star_cat),
+           '-c', str(CONFIGS / f'psfex_jwst_{chan}.psfex'),
+           '-CHECKIMAGE_TYPE', 'RESIDUALS,PROTOTYPES,SNAPSHOTS,SAMPLES',
+           '-CHECKIMAGE_NAME',
+           f'{out}/resi.fits,{out}/proto.fits,{out}/snap.fits,{out}/samp.fits']
+    t0 = time.time()
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr[-1500:], file=sys.stderr); sys.exit('PSFEx failed')
+    psf = star_cat.with_suffix('.psf')
+    if not psf.exists():
+        alt = Path.cwd() / psf.name
+        if alt.exists(): shutil.move(alt, psf)
+    ph = fits.open(psf)[1].header
+    print(f'  wall {time.time()-t0:.1f}s')
+    print(f'  PSF model: chi2={ph.get("CHI2",-1):.3f}  '
+          f'FWHM={ph.get("PSF_FWHM",-1):.2f} px  accepted={ph.get("ACCEPTED","?")}')
+
+    # ── 5. diagnostic JSON ──
+    meta = {
+        'created_utc_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'instrument': args.instrument, 'tile': args.tile, 'filter': band,
+        'channel': chan, 'zp_ab': float(zp),
+        'stellar_locus_px': float(med), 'locus_std_px': float(std),
+        'artifact_cut_px': float(cut),
+        'n_psf_stars': int(star.sum()),
+        'n_spike_stars_kept': int((star & (flg >= 2)).sum()),
+        'n_saturated_excluded': int(saturated.sum()),
+        'psf_chi2': float(ph.get('CHI2', -1)),
+        'psf_fwhm_px': float(ph.get('PSF_FWHM', -1)),
+        'psf_accepted': int(ph.get('ACCEPTED', -1)),
+        'psf_model': str(psf),
+        'recipe': 'Tanaka+2023 COSMOS-Web; keep diffraction-spike stars; '
+                  'exclude masked-core saturated; artifact-cut FR floor',
+    }
+    (out / f'psf_{band}.meta.json').write_text(json.dumps(meta, indent=2))
+    print(f'\n[save] {out / f"psf_{band}.meta.json"}')
+    print('=== PSF model build complete ===')
+
+
+if __name__ == '__main__':
+    main()
