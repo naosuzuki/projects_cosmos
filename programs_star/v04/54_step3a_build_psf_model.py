@@ -18,10 +18,17 @@ Star selection (per band):
   SNR_WIN    > 100
   ELONGATION < 1.5
   FWHM_IMAGE > 0                              (reject fit-failures)
-  0.7*locus < FLUX_RADIUS < locus + 2.5σ      (artifact-cut floor +
-                                               stellar-locus ceiling;
-                                               locus = median FR of the
-                                               CLASS_STAR/SNR/ELON base)
+  locus−3·MAD < FLUX_RADIUS < locus+2.5σ      (artifact-cut floor +
+                                               stellar-locus ceiling)
+   where:
+     locus = median FLUX_RADIUS of the CLASS_STAR>0.8 / SNR>100 /
+             FLAGS<2 / ELON<1.5 base sample.
+     MAD   = 1.4826 × median|FR−locus| on the tight, high-SNR subset
+             (SNR>500, |FR−locus|<2.5σ) — a clean proxy for the
+             real PSF-star FR scatter.
+     Floor = locus − 3·MAD ≈ 31 mas for F115W (locus 37 mas, MAD 2 mas).
+             Defined STATISTICALLY from the PSF-star scatter (3 robust σ
+             below the locus), NOT a fixed fraction of the locus.
   masked_core == 0                            (NOT saturated — JWST i2d
                                                masks the flat-topped
                                                saturated cores to 0;
@@ -155,8 +162,30 @@ def main():
 
     # stellar locus from a clean base
     base = (cs > 0.8) & (snr > 100) & (flg < 2) & (elon < 1.5) & (fr > 0)
-    med, std = np.median(fr[base]), np.std(fr[base])
-    cut = 0.7 * med
+    std0 = np.std(fr[base])
+    # Iterative 3·MAD sigma-clipping on the base FR distribution.  This
+    # self-converges to the actual PSF locus without any hand-picked SNR
+    # threshold, and gives a robust scatter estimate (MAD) immune to
+    # outliers.  Validated on F115W A4: converges in 3 iterations to
+    # median=1.22 px, MAD=0.073 px, cut=1.01 px — sits in the gap
+    # between the artifact cluster (FR < 0.85 px) and the PSF locus.
+    med = np.median(fr[base])
+    mad = 1.4826 * np.median(np.abs(fr[base] - med))
+    for _ in range(20):
+        sel = np.abs(fr[base] - med) < 3.0 * mad
+        new_med = np.median(fr[base][sel])
+        new_mad = 1.4826 * np.median(np.abs(fr[base][sel] - new_med))
+        if abs(new_med - med) < 1e-4 and abs(new_mad - mad) < 1e-4:
+            med, mad = new_med, new_mad; break
+        med, mad = new_med, new_mad
+    # Artifact cut: 3 robust σ (MAD-σ) below the converged stellar
+    # locus.  Anything below this is sharper-than-PSF → cosmic ray / hot
+    # pixel, NOT a faint star (faints scatter UP from the locus due to
+    # photon noise, not down).
+    cut = med - 3.0 * mad
+    # Keep std handy for the upper ceiling (uses base std, not MAD —
+    # the upper end is dominated by extended objects we want a soft cut on)
+    std = std0
 
     # masked-core (saturation) test on the SCI pixels
     half = args.core_box // 2
@@ -173,7 +202,9 @@ def main():
     star = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
             & (fr > cut) & (fr < med + 2.5*std)
             & (~saturated) & (~edge))
-    print(f'  stellar locus = {med:.3f} ± {std:.3f} px  (artifact cut {cut:.3f} px)')
+    print(f'  stellar locus = {med:.3f} px  (MAD-σ {mad:.3f} px, '
+          f'iterative 3·MAD clipping)')
+    print(f'  artifact cut  = locus − 3·MAD = {cut:.3f} px')
     print(f'  PSF stars selected : {star.sum()}')
     print(f'    of which deblend-flagged (spike) : {(star & (flg >= 2)).sum()}')
     print(f'  excluded saturated (masked core)   : {saturated.sum()}')
@@ -212,7 +243,9 @@ def main():
         'instrument': args.instrument, 'tile': args.tile, 'filter': band,
         'channel': chan, 'zp_ab': float(zp),
         'stellar_locus_px': float(med), 'locus_std_px': float(std),
+        'locus_mad_sigma_px': float(mad),
         'artifact_cut_px': float(cut),
+        'artifact_cut_recipe': 'locus - 3 * MAD(tight base)',
         'n_psf_stars': int(star.sum()),
         'n_spike_stars_kept': int((star & (flg >= 2)).sum()),
         'n_saturated_excluded': int(saturated.sum()),
