@@ -20,15 +20,23 @@ Star selection (per band):
   FWHM_IMAGE > 0                              (reject fit-failures)
   locus−3·MAD < FLUX_RADIUS < locus+2.5σ      (artifact-cut floor +
                                                stellar-locus ceiling)
+  NOT (n_1 ≥ 2 AND FLAGS < 2)                 (neighbour-contamination cut:
+                                               drop stars with ≥2 detections
+                                               within 1″ that are NOT their
+                                               own spike-deblends.  Bright
+                                               diffraction-spike stars have
+                                               FLAGS ≥ 2 because SExtractor
+                                               deblends their spikes; those
+                                               n_1 counts are self-spikes,
+                                               not external companions.)
    where:
      locus = median FLUX_RADIUS of the CLASS_STAR>0.8 / SNR>100 /
              FLAGS<2 / ELON<1.5 base sample.
-     MAD   = 1.4826 × median|FR−locus| on the tight, high-SNR subset
-             (SNR>500, |FR−locus|<2.5σ) — a clean proxy for the
-             real PSF-star FR scatter.
+     MAD   = 1.4826 × median|FR−locus| on iterative 3·MAD-clipped base.
      Floor = locus − 3·MAD ≈ 31 mas for F115W (locus 37 mas, MAD 2 mas).
-             Defined STATISTICALLY from the PSF-star scatter (3 robust σ
-             below the locus), NOT a fixed fraction of the locus.
+     n_1   = count of detections (any type) within 1″ of the candidate
+             centroid (KDTree neighbor query on the pass-1 catalog;
+             self excluded).
   masked_core == 0                            (NOT saturated — JWST i2d
                                                masks the flat-topped
                                                saturated cores to 0;
@@ -199,15 +207,38 @@ def main():
     saturated = masked_core > 0
     edge = (flg & 8) > 0
 
+    # Neighbour count within 1" (n_1).  External neighbours within 1"
+    # contaminate the PSF.  Spike-deblended bright stars (FLAGS≥2) get
+    # their own spike fragments counted as neighbours, so we only cut on
+    # n_1 ≥ 2 AND FLAGS < 2 (no self-deblending).  Verified on F115W A4:
+    # cuts 9 visibly-contaminated stars (vs cutting 44 if FLAGS<2 not
+    # required, 35 of which were real spike stars we want to keep).
+    from scipy.spatial import cKDTree
+    R_ARCSEC = 1.0
+    pix_scale = 0.030               # arcsec/px on COSMOS-Web 30 mas mosaics
+    r_pix = R_ARCSEC / pix_scale
+    tree = cKDTree(np.column_stack([xx, yy]))
+    n1 = np.array([len(tree.query_ball_point([xx[k], yy[k]], r_pix)) - 1
+                   for k in range(len(obj))])
+    contaminated = (n1 >= 2) & (flg < 2)
+
     star = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
             & (fr > cut) & (fr < med + 2.5*std)
-            & (~saturated) & (~edge))
+            & (~saturated) & (~edge) & (~contaminated))
     print(f'  stellar locus = {med:.3f} px  (MAD-σ {mad:.3f} px, '
           f'iterative 3·MAD clipping)')
     print(f'  artifact cut  = locus − 3·MAD = {cut:.3f} px')
+    # base of candidates that pass everything EXCEPT the contam cut —
+    # gives the meaningful "candidates dropped by this cut" count.
+    pre_contam = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
+                  & (fr > cut) & (fr < med + 2.5*std)
+                  & (~saturated) & (~edge))
+    dropped_by_contam = pre_contam & contaminated
     print(f'  PSF stars selected : {star.sum()}')
     print(f'    of which deblend-flagged (spike) : {(star & (flg >= 2)).sum()}')
     print(f'  excluded saturated (masked core)   : {saturated.sum()}')
+    print(f'  excluded contam (n_1≥2 AND FLAGS<2): {dropped_by_contam.sum()}'
+          f'  [of {pre_contam.sum()} candidates pre-cut]')
     print(f'  min FLUX_RADIUS among stars        : {fr[star].min():.3f} px '
           f'({"OK" if fr[star].min() > cut else "FAIL"} > cut {cut:.3f})')
 
@@ -249,6 +280,8 @@ def main():
         'n_psf_stars': int(star.sum()),
         'n_spike_stars_kept': int((star & (flg >= 2)).sum()),
         'n_saturated_excluded': int(saturated.sum()),
+        'n_contaminated_excluded': int(dropped_by_contam.sum()),
+        'contam_cut_recipe': 'n_1 >= 2 AND FLAGS < 2  (n_1 = neighbours within 1″)',
         'psf_chi2': float(ph.get('CHI2', -1)),
         'psf_fwhm_px': float(ph.get('PSF_FWHM', -1)),
         'psf_accepted': int(ph.get('ACCEPTED', -1)),
