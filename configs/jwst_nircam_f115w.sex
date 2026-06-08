@@ -28,7 +28,7 @@ ANALYSIS_THRESH  1.5
 FILTER           Y
 FILTER_NAME      default.conv
 DEBLEND_NTHRESH  64
-DEBLEND_MINCONT  0.0005
+DEBLEND_MINCONT  0.02            # tuned: keep diffraction spikes attached (v04 sweep)
 CLEAN            Y
 CLEAN_PARAM      1.0
 MASK_TYPE        CORRECT

@@ -41,7 +41,9 @@ SAMPLEVAR_TYPE     SEEING
 SAMPLE_FWHMRANGE   1.5,4.0     # SW stellar locus (pixels)
 SAMPLE_VARIABILITY 0.2
 SAMPLE_MINSN       100.0       # Tanaka+2023 SNR_WIN > 100
-SAMPLE_MAXELLIP    0.2         # ~ ELONGATION < 1.5
+SAMPLE_MAXELLIP    0.18        # tightened from 0.20 (F115W A4 study: all
+                               # 167 PSFEx-accepted good stars have
+                               # ELLIP_PSF<0.18, max=0.171)
 # 0x00fc rejects FLAGS bits 4(saturated),8(edge),16,... but ALLOWS
 # bit 1(neighbor) and bit 2(deblend).  The default 0x00fe rejects the
 # deblend bit, which on JWST throws away every bright star whose own

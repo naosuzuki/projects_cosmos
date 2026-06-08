@@ -14,10 +14,11 @@ Validated on JWST F115W tile A4 (see the pilot diagnostics in
     lower 1.10 because it omitted the bright stars where spikes matter)
 
 Star selection (per band):
-  CLASS_STAR > 0.8
-  SNR_WIN    > 100
-  ELONGATION < 1.5
-  FWHM_IMAGE > 0                              (reject fit-failures)
+  CLASS_STAR  > 0.8
+  SNR_WIN     > 100
+  ELONGATION  < 1.5
+  ELLIPTICITY < 0.20      ("good star" ellipticity cap; F115W A4 study)
+  FWHM_IMAGE  > 0                             (reject fit-failures)
   locus−3·MAD < FLUX_RADIUS < locus+2.5σ      (artifact-cut floor +
                                                stellar-locus ceiling)
   NOT (n_1 ≥ 2 AND FLAGS < 2)                 (neighbour-contamination cut:
@@ -168,8 +169,23 @@ def main():
     xx   = np.asarray(obj['X_IMAGE'], float)
     yy   = np.asarray(obj['Y_IMAGE'], float)
 
-    # stellar locus from a clean base
-    base = (cs > 0.8) & (snr > 100) & (flg < 2) & (elon < 1.5) & (fr > 0)
+    # stellar locus from a clean base.  Ellipticity ceiling is
+    # ELONGATION<1.5 (= ELLIPTICITY<0.33), plus PSFEx's MAXELLIP=0.20.
+    # Add a FWHM lower bound to exclude single-pixel CR/hot-pixel
+    # artifacts — these contaminate the LW base sample (F277W has ~6000
+    # such sources at FR≈0.8 px) and inflate MAD so the artifact cut
+    # goes negative.  Threshold = 0.5 × PSF FWHM, estimated from the
+    # high-SNR subset where real stars dominate.
+    base0 = (cs > 0.8) & (snr > 100) & (flg < 2) & (elon < 1.5) & (fr > 0)
+    hi = base0 & (snr > 1000)
+    if hi.sum() < 5:
+        hi = base0 & (snr > 500)
+    psf_fwhm_est = float(np.median(fwhm[hi])) if hi.sum() >= 3 else float(np.median(fwhm[base0]))
+    fwhm_min = 0.5 * psf_fwhm_est
+    base = base0 & (fwhm > fwhm_min)
+    print(f'  PSF FWHM estimate (high-SNR median): {psf_fwhm_est:.2f} px '
+          f'→ base FWHM-min = {fwhm_min:.2f} px '
+          f'(removes {(base0 & ~base).sum()} CR/hot-pixel artifacts)')
     std0 = np.std(fr[base])
     # Iterative 3·MAD sigma-clipping on the base FR distribution.  This
     # self-converges to the actual PSF locus without any hand-picked SNR
@@ -207,6 +223,29 @@ def main():
     saturated = masked_core > 0
     edge = (flg & 8) > 0
 
+    # VIGNET-gap test: PSFEx rejects any sample whose VIGNET contains
+    # masked (zero) pixels as TOO_HIGH_SATU.  This is NOT saturation —
+    # the masked pixels come from chip gaps / coverage holes in the
+    # mosaic that fall inside the (large) VIGNET footprint.  Bright LW
+    # stars near a gap have clean cores but a masked VIGNET, so they
+    # were mislabeled as PSF candidates and then surprise-rejected by
+    # PSFEx.  Pre-flag them here so they don't appear as "PSF stars".
+    #
+    # Use the VIGNET half-size for this band (SW=50, LW=75 native px).
+    vig_half = 75 if chan == 'lw' else 50
+    xiv = np.clip(np.round(xx).astype(int), vig_half, nx-vig_half-1)
+    yiv = np.clip(np.round(yy).astype(int), vig_half, ny-vig_half-1)
+    # Only worth computing for the sources that pass the cheap cuts —
+    # restrict to a pre-mask so we don't scan 365k boxes.
+    cheap = (cs > 0.8) & (snr > 100) & (elon < 1.5) & (fr > 0)
+    vignet_masked = np.zeros(len(obj), int)
+    for k in np.where(cheap)[0]:
+        box = sci[yiv[k]-vig_half:yiv[k]+vig_half+1, xiv[k]-vig_half:xiv[k]+vig_half+1]
+        vignet_masked[k] = np.sum(box == 0)
+    # tolerate a few isolated bad pixels (PSFEx interpolates over <~5);
+    # flag stars whose VIGNET overlaps a real gap (many masked pixels).
+    gap_masked = vignet_masked > 5
+
     # Neighbour count within 1" (n_1).  External neighbours within 1"
     # contaminate the PSF.  Spike-deblended bright stars (FLAGS≥2) get
     # their own spike fragments counted as neighbours, so we only cut on
@@ -222,21 +261,36 @@ def main():
                    for k in range(len(obj))])
     contaminated = (n1 >= 2) & (flg < 2)
 
-    star = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
+    # "Good star" ellipticity ceiling at the candidate stage:
+    # ELLIPTICITY < 0.20 (with PSFEx SAMPLE_MAXELLIP=0.18 downstream).
+    # F115W A4 study: 153/167 (91.6%) of PSFEx-accepted "good stars"
+    # have SExtractor ELLIPTICITY<0.20.
+    ell_arr = np.asarray(obj['ELLIPTICITY'], float)
+    e_round = ell_arr < 0.20
+    star = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
             & (fr > cut) & (fr < med + 2.5*std)
-            & (~saturated) & (~edge) & (~contaminated))
+            & e_round
+            & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
     print(f'  stellar locus = {med:.3f} px  (MAD-σ {mad:.3f} px, '
           f'iterative 3·MAD clipping)')
     print(f'  artifact cut  = locus − 3·MAD = {cut:.3f} px')
     # base of candidates that pass everything EXCEPT the contam cut —
     # gives the meaningful "candidates dropped by this cut" count.
-    pre_contam = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
+    pre_contam = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
                   & (fr > cut) & (fr < med + 2.5*std)
-                  & (~saturated) & (~edge))
+                  & e_round
+                  & (~saturated) & (~edge) & (~gap_masked))
     dropped_by_contam = pre_contam & contaminated
+    # gap-masked candidates: pass everything except the gap test
+    pre_gap = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
+               & (fr > cut) & (fr < med + 2.5*std)
+               & e_round & (~saturated) & (~edge))
+    dropped_by_gap = pre_gap & gap_masked
     print(f'  PSF stars selected : {star.sum()}')
     print(f'    of which deblend-flagged (spike) : {(star & (flg >= 2)).sum()}')
     print(f'  excluded saturated (masked core)   : {saturated.sum()}')
+    print(f'  excluded gap-masked VIGNET         : {dropped_by_gap.sum()}'
+          f'  [of {pre_gap.sum()} candidates pre-gap-cut]')
     print(f'  excluded contam (n_1≥2 AND FLAGS<2): {dropped_by_contam.sum()}'
           f'  [of {pre_contam.sum()} candidates pre-cut]')
     print(f'  min FLUX_RADIUS among stars        : {fr[star].min():.3f} px '
@@ -280,6 +334,7 @@ def main():
         'n_psf_stars': int(star.sum()),
         'n_spike_stars_kept': int((star & (flg >= 2)).sum()),
         'n_saturated_excluded': int(saturated.sum()),
+        'n_gap_masked_excluded': int(dropped_by_gap.sum()),
         'n_contaminated_excluded': int(dropped_by_contam.sum()),
         'contam_cut_recipe': 'n_1 >= 2 AND FLAGS < 2  (n_1 = neighbours within 1″)',
         'psf_chi2': float(ph.get('CHI2', -1)),
