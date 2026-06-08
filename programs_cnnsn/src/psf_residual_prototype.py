@@ -16,6 +16,7 @@ import sys, csv, time
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_cnnsn/src")
 import recut_3_hst as R
 from tile_lookup import TileResolver
 from astropy.io import fits

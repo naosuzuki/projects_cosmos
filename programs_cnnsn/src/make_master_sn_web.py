@@ -15,6 +15,7 @@ from pathlib import Path
 from importlib import import_module
 
 sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_cnnsn/src")
 mod = import_module("make_v03_polished_web")
 
 mod.CAND_CSV = Path("/Users/suzuki/github/projects_cosmos/csvfiles_sn/master_sn_gallery.csv")

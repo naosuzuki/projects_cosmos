@@ -11,6 +11,7 @@ import numpy as np
 import pyarrow.parquet as pq
 
 sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_cnnsn/src")
 CSV_DIR = Path("/Users/suzuki/github/projects_cosmos/csvfiles_sn")
 SCORED  = CSV_DIR / "sn_candidates_v07_scored.parquet"
 GAL_CSV = CSV_DIR / "v07_top100_gallery.csv"

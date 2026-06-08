@@ -1,25 +1,32 @@
 #!/usr/bin/env python
 """
-54_step3a_build_psf_model_euclid.py — HST ACS WFC F814W (COSMOS-Web 30mas tile) PSF model
-builder following the same star-selection philosophy as the JWST script,
-adapted to the different image format.
+54_step3a_build_psf_model_hst.py — HST ACS/WFC F814W PSF model builder
+on the COSMOS-Web 30 mas drizzled tiles.  Single-HDU adaptation of the
+JWST builder carrying the SAME "good star" technology validated on the
+JWST bands:
 
-Differences from the JWST version:
-  - Image is a single primary HDU (no SCI/WHT split)
-  - ZP_AB from MAGZERO header keyword (HST pipeline product)
-  - No PIXAR_SR; pixel scale 0.10"/px (CD matrix)
-  - Smaller VIGNET (51 px) since VIS PSF is ~1.6 px FWHM
-  - Different SExtractor / PSFEx configs (euclid_vis.sex,
-    psfex_euclid_vis.psfex, pass1_euclid_vis.param)
-  - Tile id = the long EUC_MER_BGSUB-MOSAIC-VIS_TILE<NNNNN> identifier;
-    we just pass it as `--tile <id>` and look up the file by glob.
+  - FWHM artifact floor (removes the single-pixel CR/hot-pixel "second
+    locus" that would inflate the MAD and push the artifact cut negative)
+  - dynamic PSFEx SAMPLE_FWHMRANGE = [0.6,2.5]×PSF_FWHM so bright stars
+    (with resolved wings) are never clipped out of the acceptance window
+  - VIGNET gap-mask test (a star whose VIGNET overlaps a coverage hole
+    is rejected by PSFEx; pre-flag it so it never poses as a PSF star)
+  - ELLIPTICITY<0.20 candidate ceiling (PSFEx SAMPLE_MAXELLIP=0.18)
+
+Format / calibration differences from JWST:
+  - single primary HDU (no SCI/WHT split); WEIGHT_TYPE NONE
+  - ZP_AB from PHOTFLAM/PHOTPLAM:
+        ZP = -2.5*log10(PHOTFLAM) - 5*log10(PHOTPLAM) - 2.408
+  - pixel scale 0.030"/px (drizzled to the COSMOS-Web 30 mas grid);
+    VIGNET 101 px
+  - tile id = the A?/B? letter-number from the COSMOS-Web tiling
+  - input image MUST come from /Volumes/exdisk1/data/HST/COSMOS_ACS2005
 
 Star selection (identical philosophy to JWST):
-  CLASS_STAR>0.8, SNR_WIN>100, ELONGATION<1.5, FWHM>0
-  locus-3*MAD < FLUX_RADIUS < locus+2.5σ  (iterative MAD)
-  masked_core == 0   (saturation = central pixels zero in source pixels)
-  NOT (n_1>=2 AND FLAGS<2)
-  NO FLAGS<2 cut
+  CLASS_STAR>0.8, SNR_WIN>100, ELONGATION<1.5, ELLIPTICITY<0.20,
+  FWHM>0.5·PSF_FWHM,  locus-3·MAD < FLUX_RADIUS < locus+2.5σ,
+  masked_core==0,  not gap-masked,  NOT (n_1>=2 AND FLAGS<2).
+  Diffraction-spike (FLAGS>=2) stars are KEPT.
 """
 from __future__ import annotations
 import argparse, json, shutil, subprocess, sys, time
@@ -27,31 +34,33 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 from scipy.spatial import cKDTree
+from psf_saturation import core_peak, detect_saturation
 
 PROJECT  = Path('/Users/suzuki/github/projects_cosmos')
 CONFIGS  = PROJECT / 'configs'
 HST_ROOT = Path('/Volumes/exdisk1/data/HST/COSMOS_ACS2005')
 WORK     = Path('/Volumes/exdisk1/data/photometry_v04')
 
-PIX_HST  = 0.030  # arcsec / pix (COSMOS-Web 30mas drizzle of ACS WFC)
+PIX_HST  = 0.030  # arcsec / pix (COSMOS-Web 30 mas drizzle of ACS/WFC)
+VIG_HALF = 50     # VIGNET(101,101) half-size, for the gap-mask test
 
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--instrument', default='hst_acs_f814w')
     p.add_argument('--tile', required=True,
-                   help='HST tile id (the 9-digit number from TILE<id>)')
+                   help='COSMOS-Web tile id (e.g. A4)')
     p.add_argument('--core-box', type=int, default=3,
-                   help='central NxN box to test for masked (=0) pixels '
-                        '(HST ACS WFC F814W PSF is smaller than JWST → use 3×3)')
+                   help='central NxN box to test for masked (=0) pixels')
     p.add_argument('--reuse-pass1', action='store_true')
     return p.parse_args()
 
 
 def find_tile_image(tile_id: str) -> Path:
-    matches = list(HST_ROOT.glob(f'mosaic_cosmos_web_2023apr_30mas_tile_{tile_id}_hst_acs_wfc_f814w_drz.fits'))
+    matches = list(HST_ROOT.glob(
+        f'mosaic_cosmos_web_2023apr_30mas_tile_{tile_id}_hst_acs_wfc_f814w_drz.fits'))
     if not matches:
-        sys.exit(f'No HST ACS WFC F814W image matches TILE{tile_id} in {HST_ROOT}')
+        sys.exit(f'No HST ACS/WFC F814W image matches tile {tile_id} in {HST_ROOT}')
     return matches[0]
 
 
@@ -105,11 +114,21 @@ def main():
     snr  = np.asarray(obj['SNR_WIN'], float)
     flg  = np.asarray(obj['FLAGS'], int)
     elon = np.asarray(obj['ELONGATION'], float)
+    ell_arr = np.asarray(obj['ELLIPTICITY'], float)
     xx   = np.asarray(obj['X_IMAGE'], float)
     yy   = np.asarray(obj['Y_IMAGE'], float)
 
-    # iterative MAD on the base sample for locus + cut
-    base = (cs > 0.8) & (snr > 100) & (flg < 2) & (elon < 1.5) & (fr > 0)
+    # FWHM artifact floor + iterative MAD locus (see module docstring).
+    base0 = (cs > 0.8) & (snr > 100) & (flg < 2) & (elon < 1.5) & (fr > 0)
+    hi = base0 & (snr > 1000)
+    if hi.sum() < 5:
+        hi = base0 & (snr > 500)
+    psf_fwhm_est = float(np.median(fwhm[hi])) if hi.sum() >= 3 else float(np.median(fwhm[base0]))
+    fwhm_min = 0.5 * psf_fwhm_est
+    base = base0 & (fwhm > fwhm_min)
+    print(f'  PSF FWHM estimate (high-SNR median): {psf_fwhm_est:.2f} px '
+          f'→ base FWHM-min = {fwhm_min:.2f} px '
+          f'(removes {(base0 & ~base).sum()} CR/hot-pixel artifacts)')
     std0 = np.std(fr[base])
     med = np.median(fr[base])
     mad = 1.4826 * np.median(np.abs(fr[base] - med))
@@ -131,36 +150,69 @@ def main():
     for k in range(len(obj)):
         box = sci[yi[k]-half:yi[k]+half+1, xi[k]-half:xi[k]+half+1]
         masked_core[k] = np.sum(box == 0)
-    saturated = masked_core > 0
     edge = (flg & 8) > 0
 
-    # n_1 (1″ at 0.1″/px → 10 px)
+    # Saturation = masked core OR a core peak sitting on the bright-end PEAK
+    # PLATEAU.  HST ACS drizzled mosaics do NOT zero saturated cores — they
+    # plateau — so the masked-core test alone misses saturated bright stars;
+    # detect_saturation finds the plateau (onset ~18.4 mag on A4) and we
+    # reject point sources whose core peak sits on it.
+    is_point = (cs > 0.8) & (snr > 100)
+    peak = core_peak(sci, xx, yy, half=2, idx=np.where(is_point)[0])
+    sat_peak_level, onset_mag = detect_saturation(mag, peak, masked_core, is_point)
+    peak_saturated = np.isfinite(peak) & (peak >= sat_peak_level)
+    saturated = (masked_core > 0) | peak_saturated
+    print(f'  saturation: masked-core={int((masked_core>0).sum())}  '
+          f'peak-plateau={int(peak_saturated.sum())}  '
+          f'(sat_peak_level={"∞" if not np.isfinite(sat_peak_level) else f"{sat_peak_level:.3g}"}, '
+          f'onset_mag={onset_mag if onset_mag is None else round(onset_mag,2)})')
+
+    # VIGNET-gap test: a star whose VIGNET footprint overlaps a coverage
+    # hole (zero pixels) is surprise-rejected by PSFEx; pre-flag it.
+    xiv = np.clip(np.round(xx).astype(int), VIG_HALF, nx-VIG_HALF-1)
+    yiv = np.clip(np.round(yy).astype(int), VIG_HALF, ny-VIG_HALF-1)
+    cheap = (cs > 0.8) & (snr > 100) & (elon < 1.5) & (fr > 0)
+    vignet_masked = np.zeros(len(obj), int)
+    for k in np.where(cheap)[0]:
+        box = sci[yiv[k]-VIG_HALF:yiv[k]+VIG_HALF+1, xiv[k]-VIG_HALF:xiv[k]+VIG_HALF+1]
+        vignet_masked[k] = np.sum(box == 0)
+    gap_masked = vignet_masked > 5
+
+    # n_1 (1″ at 0.030″/px)
     tree = cKDTree(np.column_stack([xx, yy]))
     r_pix = 1.0 / PIX_HST
     n1 = np.array([len(tree.query_ball_point([xx[k], yy[k]], r_pix)) - 1
                    for k in range(len(obj))])
     contaminated = (n1 >= 2) & (flg < 2)
 
-    ell_arr = np.asarray(obj['ELLIPTICITY'], float)
-    e_round = ell_arr < 0.15
-    star = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
-            & (fr > cut) & (fr < med + 3.0*mad)
+    # "Good star" ellipticity ceiling (F115W A4 study): ELLIPTICITY < 0.20
+    # at candidate stage, PSFEx SAMPLE_MAXELLIP=0.18 downstream.
+    e_round = ell_arr < 0.20
+    star = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
+            & (fr > cut) & (fr < med + 2.5*std0)
             & e_round
-            & (~saturated) & (~edge) & (~contaminated))
+            & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
 
-    pre_contam = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
-                  & (fr > cut) & (fr < med + 3.0*mad)
+    pre_contam = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
+                  & (fr > cut) & (fr < med + 2.5*std0)
                   & e_round
-                  & (~saturated) & (~edge))
+                  & (~saturated) & (~edge) & (~gap_masked))
+    pre_gap = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
+               & (fr > cut) & (fr < med + 2.5*std0)
+               & e_round & (~saturated) & (~edge))
+    dropped_by_gap = pre_gap & gap_masked
     print(f'  stellar locus = {med:.3f} px  (MAD-σ {mad:.3f} px)')
     print(f'  artifact cut  = locus − 3·MAD = {cut:.3f} px')
     print(f'  PSF stars selected : {star.sum()}')
     print(f'    deblend-flagged spike stars     : {(star & (flg >= 2)).sum()}')
     print(f'  excluded saturated (masked core)  : {saturated.sum()}')
+    print(f'  excluded gap-masked VIGNET        : {dropped_by_gap.sum()}'
+          f'  [of {pre_gap.sum()} candidates pre-gap-cut]')
     print(f'  excluded contam (n_1≥2 & FLAGS<2) : {(pre_contam & contaminated).sum()}'
           f'  [of {pre_contam.sum()} pre-cut]')
-    print(f'  min FR among PSF stars            : {fr[star].min():.3f} px'
-          f'  ({"OK" if fr[star].min() > cut else "FAIL"} > cut {cut:.3f})')
+    if star.sum():
+        print(f'  min FR among PSF stars            : {fr[star].min():.3f} px'
+              f'  ({"OK" if fr[star].min() > cut else "FAIL"} > cut {cut:.3f})')
 
     # write filtered LDAC
     star_cat = out / f'stars_{args.tile}.fits'
@@ -168,10 +220,15 @@ def main():
     hcat.writeto(star_cat, overwrite=True)
     print(f'  wrote {star_cat.name} ({star.sum()} stars)')
 
-    # ── PSFEx ──
+    # ── PSFEx — dynamic SAMPLE_FWHMRANGE scaled to the measured PSF FWHM ──
+    fwhm_lo = max(0.8, 0.6 * psf_fwhm_est)
+    fwhm_hi = 2.5 * psf_fwhm_est
     print('\n── PSFEx ──', flush=True)
+    print(f'  SAMPLE_FWHMRANGE = {fwhm_lo:.2f},{fwhm_hi:.2f} px '
+          f'(scaled to PSF FWHM {psf_fwhm_est:.2f})')
     cmd = ['psfex', str(star_cat),
            '-c', str(CONFIGS / 'psfex_hst_acs.psfex'),
+           '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
            '-CHECKIMAGE_TYPE', 'RESIDUALS,PROTOTYPES,SNAPSHOTS,SAMPLES',
            '-CHECKIMAGE_NAME',
            f'{out}/resi.fits,{out}/proto.fits,{out}/snap.fits,{out}/samp.fits']
@@ -190,13 +247,21 @@ def main():
 
     # diagnostic JSON
     (out / f'psf_{args.tile}.meta.json').write_text(json.dumps({
+        'created_utc_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         'instrument': args.instrument, 'tile': args.tile,
         'zp_ab': zp, 'pixel_scale_arcsec': PIX_HST,
-        'stellar_locus_px': float(med), 'locus_mad_sigma_px': float(mad),
+        'psf_fwhm_est_px': float(psf_fwhm_est),
+        'sample_fwhmrange': [float(fwhm_lo), float(fwhm_hi)],
+        'stellar_locus_px': float(med), 'locus_std_px': float(std0),
+        'locus_mad_sigma_px': float(mad),
         'artifact_cut_px': float(cut),
         'n_psf_stars': int(star.sum()),
         'n_spike_stars_kept': int((star & (flg >= 2)).sum()),
         'n_saturated_excluded': int(saturated.sum()),
+        'sat_peak_level': (None if not np.isfinite(sat_peak_level) else float(sat_peak_level)),
+        'sat_onset_mag': onset_mag,
+        'n_peak_saturated': int(peak_saturated.sum()),
+        'n_gap_masked_excluded': int(dropped_by_gap.sum()),
         'n_contaminated_excluded': int((pre_contam & contaminated).sum()),
         'psf_chi2': float(ph.get('CHI2', -1)),
         'psf_fwhm_px': float(ph.get('PSF_FWHM', -1)),
@@ -204,7 +269,7 @@ def main():
         'psf_model': str(psf),
     }, indent=2))
     print(f'\n[save] {out / f"psf_{args.tile}.meta.json"}')
-    print('=== HST ACS WFC F814W PSF build complete ===')
+    print('=== HST ACS/WFC F814W PSF build complete ===')
 
 
 if __name__ == '__main__':

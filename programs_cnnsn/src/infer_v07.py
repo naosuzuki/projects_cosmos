@@ -18,6 +18,7 @@ import pyarrow as pa, pyarrow.parquet as pq
 import torch
 
 sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_cnnsn/src")
 import train_v07 as T          # reuse sigma_units, to_input, cutout_at, SNCNN, CHANNELS
 from tile_lookup import TileResolver
 from astropy.io import fits
