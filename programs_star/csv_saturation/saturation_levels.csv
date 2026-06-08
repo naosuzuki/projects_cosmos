@@ -1,0 +1,9 @@
+instrument,tile,saturated,sat_onset_mag,sat_peak_level,n_peak_saturated,n_saturated_excluded,zp_ab,created_utc
+hst_acs_f814w,A4,yes,19.0,39.4525,67,191,25.9519,2026-06-08T17:01:42Z
+euclid_vis,101538497,yes,18.182,,0,233,24.5,2026-06-08T17:07:05Z
+euclid_vis,101538498,yes,17.265,,0,807,24.5,2026-06-08T17:07:55Z
+euclid_vis,101538499,yes,17.055,,0,2282,24.5,2026-06-08T17:08:48Z
+euclid_vis,101538500,no,,,0,13,24.5,2026-06-08T17:07:23Z
+euclid_vis,101539933,no,,,0,43,24.5,2026-06-08T17:07:32Z
+euclid_vis,101539934,yes,18.019,,0,595,24.5,2026-06-08T17:08:11Z
+euclid_vis,101539935,yes,16.659,,0,534,24.5,2026-06-08T17:09:09Z
