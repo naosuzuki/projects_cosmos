@@ -54,6 +54,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_cnnsn/src")
 import recut_3_hst as R
 
 CSV_DIR     = Path("/Users/suzuki/github/projects_cosmos/csvfiles_sn")
@@ -185,6 +186,7 @@ def worker_extract(args):
     import warnings; warnings.filterwarnings("ignore")
     import sys
     sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_webpage")
+    sys.path.insert(0, "/Users/suzuki/github/projects_cosmos/programs_cnnsn/src")
     from astropy.io import fits
     from astropy.wcs import WCS
     import numpy as np
