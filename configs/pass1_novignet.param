@@ -1,0 +1,41 @@
+# SExtractor pass-1 output columns — DETECTION ONLY, no PSF photometry.
+# Run before PSFEx; PSF model is built from this catalog.
+#
+# source from the science image based on the pass-1 X/Y_IMAGE).
+
+NUMBER
+X_IMAGE
+Y_IMAGE
+XWIN_IMAGE
+YWIN_IMAGE
+ALPHA_J2000
+DELTA_J2000
+
+# shape / morphology
+A_IMAGE
+B_IMAGE
+THETA_IMAGE
+ELONGATION
+ELLIPTICITY
+FWHM_IMAGE
+FLUX_RADIUS
+CLASS_STAR
+
+# aperture / AUTO photometry
+FLUX_APER(3)
+FLUXERR_APER(3)
+MAG_APER(3)
+MAGERR_APER(3)
+FLUX_AUTO
+FLUXERR_AUTO
+MAG_AUTO
+MAGERR_AUTO
+
+# flags + background
+FLAGS
+FLAGS_WEIGHT
+BACKGROUND
+THRESHOLD
+SNR_WIN
+
+# REQUIRED by PSFEx — slice small thumbnails of each source

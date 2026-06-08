@@ -317,3 +317,72 @@ Concrete case (cand_65 inspection, 2026-05-27):
 **Fix in v02 master:** join PM info by `(hst_id, hst_tile)` tuple, not
 `hst_id` alone.  Or first deduplicate hst rows by adding a globally
 unique `hst_uid = f"{tile}_{hst_id}"` column and join on that.
+
+
+----
+
+## Step 3a — empirical PSF models (v04 `programs_star/v04/`)
+
+Per-band empirical PSF models built with PSFEx, following Tanaka+2023
+(COSMOS-Web NIRCam, same 30 mas mosaics).  Pilot tile = **A4**, validated
+on all 4 JWST bands + Euclid VIS; HST ACS F814W adapter ready.
+
+### Scripts (reproducible)
+- `54_step3a_build_psf_model.py` — JWST builder (SExtractor pass-1 →
+  star selection → PSFEx).  `_euclid.py` / `_hst.py` variants for the
+  single-HDU mosaics (ZP from MAGZERO / PHOTFLAM·PHOTPLAM).
+- `56_make_psf_qa_plots.py` (+ `_euclid.py`) — 6 QA plots per (band,tile).
+- `55_make_psf_qa_site.py` — static QA site at `html/psf_qa/`.
+- `57_run_jwst_psf_qa.sh` — **one-command reproducible driver** for all
+  4 JWST bands on a tile (runs 54→56 per band, then 55).
+- `deblend_sweep_A4.log`, `HANDOFF_psf_qa.md` — sweep record + handoff.
+
+### "Good star" selection (LOCKED — validated on F115W A4)
+- `CLASS_STAR>0.8`, `SNR_WIN>100`, `ELONGATION<1.5`, `ELLIPTICITY<0.20`
+- `FWHM_IMAGE > 0.5 × PSF_FWHM` — kills 1-px CR/hot-pixel artifacts (a
+  *second locus* at FR≈0.8 px that otherwise inflates the MAD; visually
+  confirmed as cosmic rays).  `PSF_FWHM` = median FWHM of the SNR>1000
+  subset (real stars dominate).
+- `locus − 3·MAD < FLUX_RADIUS < locus + 2.5·std`  (iterative MAD locus)
+- `masked_core == 0` (JWST i2d masks saturated cores to **0**, not NaN;
+  SExtractor SATUR flag is NOT triggered — must test pixels == 0)
+- `gap_masked`: >5 zero pixels in the VIGNET footprint (chip gaps)
+- `NOT (n_1 ≥ 2 AND FLAGS < 2)` — neighbour contamination; the FLAGS<2
+  conjunction is essential because bright stars' own diffraction spikes
+  get deblended (FLAGS≥2) and would otherwise be cut as "neighbours".
+- PSFEx: `SAMPLE_FLAGMASK 0x00fc` (allow neighbour+deblend bits),
+  `SAMPLE_MAXELLIP 0.18`.
+
+### TWO per-filter knobs (the hard-won lessons)
+1. **`DEBLEND_MINCONT` per band** (in `configs/jwst_nircam_<band>.sex`):
+   F115W=0.02, F150W/F277W/F444W=**0.05** (vs old 0.0005).  Aggressive
+   deblending split bright stars' diffraction spikes into separate
+   objects → spike pixels blanked (−1e30) in the VIGNET.  Higher MINCONT
+   keeps spikes ATTACHED so they become part of the PSF model.  LW spikes
+   need 100× the old value.  (Sweep metric: % bright FLAGS<2 + mean n_1;
+   see `deblend_sweep_A4.log` + `pilot/deblend_knee_A4.png`.)
+2. **`SAMPLE_FWHMRANGE` scaled to PSF FWHM** — computed dynamically in
+   54_ as `[0.6, 2.5]×PSF_FWHM`, written to the meta JSON, re-read by 56_.
+   The fixed config range (LW 2–6 px) cut THROUGH the F444W locus
+   (PSF FWHM 5.9, bright stars to 8.7 px) and rejected EVERY bright star.
+   This was the real cause of "bright stars on the locus rejected", NOT
+   saturation/gaps/spikes.  Fix took F444W from 60→186 accepted.
+
+### Final A4 results
+| band | DEBLEND_MINCONT | FWHMrange (px) | locus (px) | cut (px) | cand | acc | χ² |
+|------|---|---|---|---|---|---|---|
+| F115W | 0.02 | 1.5–5.0  | 1.29 | 0.90 | 229 | 127 | 1.38 |
+| F150W | 0.05 | 1.5–5.5  | 1.37 | 1.04 | 335 | 251 | 1.31 |
+| F277W | 0.05 | 2.6–10.9 | 2.39 | 1.93 | 126 | 100 | 1.67 |
+| F444W | 0.05 | 3.4–14.0 | 3.02 | 2.69 | 245 | 186 | 1.54 |
+
+All 4 LW/SW models visibly reproduce the NIRCam diffraction-spike
+pattern (the science goal).  χ² is SNR-weighted, so it rises when bright
+spike stars are included — that is EXPECTED, not a regression.
+
+### QA plot conventions (56_)
+- mosaic cell size auto-detected (SW 101, LW 151, Euclid 51 px); panels
+  forced square via `aspect='equal'` + figsize matched to data aspect.
+- mag-vs-halflight: solid red = PSFEx-accepted, open red = candidate
+  rejected; black-X saturated; blue artifacts.
+- residual stretch = sqrt, 99.5% of own range; red frame = χ²>1.6.

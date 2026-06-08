@@ -303,9 +303,20 @@ def main():
     print(f'  wrote {star_cat.name} ({star.sum()} stars)')
 
     # ── 4. PSFEx ──
+    # Per-band SAMPLE_FWHMRANGE scaled to the measured PSF FWHM.  The fixed
+    # config range (SW 1.5-4.0, LW 2.0-6.0) cut THROUGH the stellar locus
+    # for the wide LW PSFs: F444W PSF FWHM≈5.9 px but bright stars measure
+    # up to 8.7 px (resolved wings), so the 6.0 ceiling rejected ALL bright
+    # stars (the ones carrying the diffraction-spike signal).  Scale the
+    # window to [0.6, 2.5]×PSF_FWHM so bright stars are kept across bands.
+    fwhm_lo = max(1.2, 0.6 * psf_fwhm_est)
+    fwhm_hi = 2.5 * psf_fwhm_est
     print('\n── PSFEx ──', flush=True)
+    print(f'  SAMPLE_FWHMRANGE = {fwhm_lo:.2f},{fwhm_hi:.2f} px '
+          f'(scaled to PSF FWHM {psf_fwhm_est:.2f})')
     cmd = ['psfex', str(star_cat),
            '-c', str(CONFIGS / f'psfex_jwst_{chan}.psfex'),
+           '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
            '-CHECKIMAGE_TYPE', 'RESIDUALS,PROTOTYPES,SNAPSHOTS,SAMPLES',
            '-CHECKIMAGE_NAME',
            f'{out}/resi.fits,{out}/proto.fits,{out}/snap.fits,{out}/samp.fits']
@@ -327,6 +338,8 @@ def main():
         'created_utc_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         'instrument': args.instrument, 'tile': args.tile, 'filter': band,
         'channel': chan, 'zp_ab': float(zp),
+        'psf_fwhm_est_px': float(psf_fwhm_est),
+        'sample_fwhmrange': [float(fwhm_lo), float(fwhm_hi)],
         'stellar_locus_px': float(med), 'locus_std_px': float(std),
         'locus_mad_sigma_px': float(mad),
         'artifact_cut_px': float(cut),

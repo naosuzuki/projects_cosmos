@@ -1,0 +1,44 @@
+# PSFEx config — Euclid VIS  (MER DR1 mosaics, 0.10"/px).
+#
+# VIS PSF FWHM ~0.16" = ~1.6 pixels (near-diffraction-limited, undersampled).
+# Use 2x oversampling so the model captures the sharp core, and a large
+# model stamp to keep the broader VIS PSF halo + ghost structure within
+# the fit volume.
+#
+# Requires VIGNET(51,51) in the SExtractor pass-1 catalog
+# (51 native px × oversample 2 ≈ 101 model px).
+
+#-------------------------------- PSF model ---------------------------------
+BASIS_TYPE      PIXEL_AUTO
+BASIS_NUMBER    20
+PSF_SAMPLING    0.5            # 2x oversampled (PSF is undersampled at 0.1")
+PSF_ACCURACY    0.01
+PSF_SIZE        101,101        # model stamp (oversampled px)
+CENTER_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PHOTFLUX_KEY    FLUX_APER(1)
+PHOTFLUXERR_KEY FLUXERR_APER(1)
+
+#----------------------------- PSF variability ------------------------------
+PSFVAR_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PSFVAR_GROUPS   1,1
+PSFVAR_DEGREES  1              # linear spatial model
+
+#----------------------------- Sample selection -----------------------------
+SAMPLE_AUTOSELECT  Y
+SAMPLEVAR_TYPE     SEEING
+SAMPLE_FWHMRANGE   1.0,3.5     # VIS stellar locus (pixels) — narrow + bright
+SAMPLE_VARIABILITY 0.2
+SAMPLE_MINSN       100.0
+SAMPLE_MAXELLIP    0.18        # tightened; matches F115W A4 study
+# 0x00fc allows neighbor(1)+deblend(2), rejects saturated(4)+edge(8)+...
+SAMPLE_FLAGMASK    0x00fc
+
+#----------------------------- Output catalog -------------------------------
+OUTCAT_TYPE        FITS_LDAC
+
+#------------------------------ Check-Images --------------------------------
+CHECKPLOT_DEV       NULL
+CHECKIMAGE_TYPE     NONE
+WRITE_XML           N
+VERBOSE_TYPE        QUIET
+NTHREADS            0
