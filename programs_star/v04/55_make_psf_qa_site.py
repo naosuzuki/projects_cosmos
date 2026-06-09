@@ -247,33 +247,56 @@ def write_index(band_status: dict[str, int]):
 
 
 def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
-                      img_rel: str):
-    """Write a viewer page that shows a single full-size image with a back
-    button to the band page."""
+                      img_rel: str, tiles: list[str]):
+    """Write a viewer page showing one full-size image, with prev/next-tile
+    pagination (same band + same panel, wrapping A1↔…↔B10) and a back button.
+    `tiles` is the band's full, naturally-ordered tile list."""
     viewer_dir = HTML_DIR / 'viewer' / band / tile
     viewer_dir.mkdir(parents=True, exist_ok=True)
     # img_rel is relative to html/psf_qa/  (e.g. plots/F115W/A4/foo.png),
     # but the viewer lives at html/psf_qa/viewer/F115W/A4/ → go up 3 dirs
     img_from_viewer = f'../../../{img_rel}'
     back_href       = f'../../../{band}.html'
+    # prev/next tile (wrapping), linking to the SAME panel one dir over
+    i = tiles.index(tile)
+    prev_tile = tiles[(i - 1) % len(tiles)]
+    next_tile = tiles[(i + 1) % len(tiles)]
+    prev_href = f'../{prev_tile}/{panel}.html'
+    next_href = f'../{next_tile}/{panel}.html'
     html = dedent(f'''
         <!doctype html>
         <html><head>
           <meta charset="utf-8">
           <title>PSF QA — {band} {tile} — {panel_title}</title>
           <link rel="stylesheet" href="../../../css/style.css">
+          <style>
+            .tile-nav {{ display:flex; gap:10px; align-items:center; margin-top:8px; }}
+            .tile-nav .cur {{ font-weight:600; }}
+            .tile-nav .spacer {{ flex:1; }}
+          </style>
         </head><body>
         <header>
-          <h1>{band} / {tile} — {panel_title}
-            <a class="back-btn" href="{back_href}">← Back to {band}</a>
-          </h1>
+          <h1>{band} / {tile} — {panel_title}</h1>
+          <div class="tile-nav">
+            <a class="back-btn" href="{prev_href}">◀ Prev tile ({prev_tile})</a>
+            <span class="cur">{tile}</span>
+            <a class="back-btn" href="{next_href}">Next tile ({next_tile}) ▶</a>
+            <span class="spacer"></span>
+            <a class="back-btn" href="{back_href}">↑ All {band} tiles</a>
+          </div>
         </header>
         <div class="viewer-wrap">
-          <div class="viewer-title">Click image for native pixel size</div>
+          <div class="viewer-title">Click image for native pixel size · ← / → arrow keys flip tiles</div>
           <a href="{img_from_viewer}" target="_blank">
             <img src="{img_from_viewer}" alt="{panel}">
           </a>
         </div>
+        <script>
+          document.addEventListener('keydown', function (e) {{
+            if (e.key === 'ArrowRight') location.href = '{next_href}';
+            else if (e.key === 'ArrowLeft') location.href = '{prev_href}';
+          }});
+        </script>
         </body></html>
     ''').strip()
     out = viewer_dir / f'{panel}.html'
@@ -295,7 +318,7 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
         for panel, panel_title in PANELS:
             if panel in linked:
                 rel = linked[panel]
-                viewer_rel = write_viewer_page(band, tile, panel, panel_title, rel)
+                viewer_rel = write_viewer_page(band, tile, panel, panel_title, rel, tiles)
                 cells.append(
                     f'<td class="panel"><a href="{viewer_rel}">'
                     f'<span class="thumb-box"><img src="{rel}" alt="{panel}"/></span>'
