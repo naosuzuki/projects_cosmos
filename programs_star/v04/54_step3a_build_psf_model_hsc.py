@@ -82,11 +82,14 @@ def parse_args():
     p.add_argument('--patch', default='40', help='HSC tract-9813 patch number (0-80)')
     p.add_argument('--filter', default='i', choices=['g', 'r', 'i', 'z', 'y'])
     p.add_argument('--core-box', type=int, default=5)
-    p.add_argument('--snr-min', type=float, default=30.0,
+    p.add_argument('--snr-min', type=float, default=8.0,
                    help='SNR_WIN floor for PSF stars.  HSC WEIGHT-NONE SNR_WIN '
-                        'is on a compressed scale (max ~250), so the 100 used '
-                        'for the space missions keeps almost nothing; 30 is the '
-                        'HSC-tuned floor (the brightest unsaturated ~13%).')
+                        'is on a compressed scale (max ~250); 8 reaches the '
+                        'faint end of the clean stellar locus (~mag 24).')
+    p.add_argument('--faint-mag', type=float, default=24.0,
+                   help='Faint magnitude limit for PSF stars.  The HSC stellar '
+                        'locus is clean from ~19 to ~24 mag; beyond ~24 the '
+                        'FLUX_RADIUS scatters into the galaxy sea.')
     p.add_argument('--reuse-pass1', action='store_true')
     return p.parse_args()
 
@@ -229,11 +232,15 @@ def main():
     upper_bright = med + 6.0 * mad
     upper_arr = np.where(np.isfinite(mag) & (mag < bright_pivot), upper_bright, upper)
     keep_fr = (fr > cut) & (fr < upper_arr)
+    # faint magnitude limit: the clean stellar locus runs ~19-24 mag; beyond
+    # ~24 the FLUX_RADIUS scatters into the galaxy sea (bright end = saturation)
+    mag_ok = np.isfinite(mag) & (mag < a.faint_mag)
     star = ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
-            & keep_fr & e_round & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
+            & keep_fr & e_round & mag_ok
+            & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
     print(f'  PSF stars selected : {star.sum()}   '
-          f'(saturated/bad excl {saturated.sum()}, gap {gap_masked.sum()}, '
-          f'contam {contaminated.sum()})')
+          f'(mag<{a.faint_mag:.1f}; saturated/bad excl {saturated.sum()}, '
+          f'gap {gap_masked.sum()}, contam {contaminated.sum()})')
 
     # ── two-pass PSFEx: validate, then rebuild from accepted∪bright-override ──
     sel_idx = np.where(star)[0]
@@ -242,7 +249,7 @@ def main():
     fwhm_lo = max(1.2, 0.6 * psf_fwhm_est); fwhm_hi = 2.5 * psf_fwhm_est
     print(f'\n── PSFEx pass 1 (validate; SAMPLE_FWHMRANGE {fwhm_lo:.2f},{fwhm_hi:.2f}) ──', flush=True)
     p1out = out / f'p1outcat_{suffix}.fits'
-    r = subprocess.run(['psfex', str(all_cat), '-c', str(CONFIGS / 'psfex_hst_acs.psfex'),
+    r = subprocess.run(['psfex', str(all_cat), '-c', str(CONFIGS / 'psfex_hsc.psfex'),
                         '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
                         '-SAMPLE_MINSN', f'{a.snr_min:.1f}',
                         '-OUTCAT_TYPE', 'FITS_LDAC', '-OUTCAT_NAME', str(p1out),
@@ -274,7 +281,7 @@ def main():
     print(f'  wrote {star_cat.name} ({n_mod} model stars: {n_acc} PSFEx + {n_ovr} bright anchors)')
 
     print('── PSFEx pass 2 (final model, bright anchors retained) ──', flush=True)
-    cmd = ['psfex', str(star_cat), '-c', str(CONFIGS / 'psfex_hst_acs.psfex'),
+    cmd = ['psfex', str(star_cat), '-c', str(CONFIGS / 'psfex_hsc.psfex'),
            '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
            '-SAMPLE_MINSN', f'{a.snr_min:.1f}', '-PSF_ACCURACY', '0.5',
            '-CHECKIMAGE_TYPE', 'RESIDUALS,PROTOTYPES,SNAPSHOTS,SAMPLES',
@@ -314,6 +321,7 @@ def main():
         'n_gaia_matched': int(gaia_star.sum()),
         'sat_onset_mag': onset_mag,
         'snr_min': float(a.snr_min),
+        'faint_mag': float(a.faint_mag),
         'n_psf_stars': int(star.sum()),
         'n_psfex_accepted': n_acc,
         'n_override_bright': n_ovr,

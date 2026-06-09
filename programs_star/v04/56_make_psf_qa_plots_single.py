@@ -55,11 +55,11 @@ INSTRUMENTS = {
     'euclid_nisp_j': {'pix': 0.10,  'psfex': 'psfex_euclid_nisp.psfex', 'label': 'Euclid NISP J'},
     'euclid_nisp_h': {'pix': 0.10,  'psfex': 'psfex_euclid_nisp.psfex', 'label': 'Euclid NISP H'},
     # HSC SSP s23b deepCoadd (LSST calexp), 0.168"/px; HST-ACS PSFEx config.
-    'hsc_g': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC g'},
-    'hsc_r': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC r'},
-    'hsc_i': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC i'},
-    'hsc_z': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC z'},
-    'hsc_y': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC y'},
+    'hsc_g': {'pix': 0.168, 'psfex': 'psfex_hsc.psfex', 'label': 'HSC g'},
+    'hsc_r': {'pix': 0.168, 'psfex': 'psfex_hsc.psfex', 'label': 'HSC r'},
+    'hsc_i': {'pix': 0.168, 'psfex': 'psfex_hsc.psfex', 'label': 'HSC i'},
+    'hsc_z': {'pix': 0.168, 'psfex': 'psfex_hsc.psfex', 'label': 'HSC z'},
+    'hsc_y': {'pix': 0.168, 'psfex': 'psfex_hsc.psfex', 'label': 'HSC y'},
 }
 PIX        = 0.10      # arcsec/pixel — overwritten per-instrument in main()
 _PSFEX_CFG = 'psfex_euclid_vis.psfex'  # overwritten per-instrument in main()
@@ -283,7 +283,10 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
                    label=f'Saturation onset = {sat_onset_mag:.2f} mag (bright limit)')
     ax.set_xlabel(f'MAG_AUTO ({band_upper}, AB)', fontsize=15, family='serif')
     ax.set_ylabel('Half-light radius FLUX_RADIUS [arcsec]', fontsize=15, family='serif')
-    ax.set_ylim(0, 0.55); ax.set_xlim(13.5, 30.5)
+    # ground-based data (HSC, 0.168"/px) can't resolve below ~0.3" half-light,
+    # so floor the y-axis there; space missions keep 0.
+    _ymin = 0.30 if PIX >= 0.15 else 0.0
+    ax.set_ylim(_ymin, 0.55); ax.set_xlim(13.5, 30.5)
     ax.set_title(f'{band_upper} — Magnitude vs Half-Light Radius',
                  fontsize=13, family='serif')
     ax.legend(loc='upper right', fontsize=11, framealpha=0.92)

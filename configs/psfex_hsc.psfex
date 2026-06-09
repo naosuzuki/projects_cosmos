@@ -1,0 +1,34 @@
+# PSFEx config for HSC SSP s23b deepCoadd patches (LSST calexp).
+#
+# HSC is GROUND-based and WELL-sampled: 0.168"/px, seeing ~0.6-0.85" → PSF
+# FWHM ~4-5 px (FLUX_RADIUS ~2.5 px).  Unlike the space missions it must NOT
+# be 2x-oversampled (PSF_SAMPLING 0.5 on a well-sampled PSF rings) and must use
+# a COMPACT model stamp — a 17" (201-oversampled-px) stamp is mostly sky and
+# neighbour light in the crowded COSMOS field, wrecking the residuals.
+#   * PSF_SAMPLING 1.0  — native (well-sampled).
+#   * PSF_SIZE 41,41    — 6.9" stamp: core + inner wings, minimal neighbours.
+#   * PSFVAR_DEGREES 2  — ~50-100 stars/patch (quadratic spatial model).
+BASIS_TYPE      PIXEL_AUTO
+BASIS_NUMBER    20
+PSF_SAMPLING    1.0
+PSF_ACCURACY    0.01
+PSF_SIZE        41,41
+CENTER_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PHOTFLUX_KEY    FLUX_APER(1)
+PHOTFLUXERR_KEY FLUXERR_APER(1)
+PSFVAR_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PSFVAR_GROUPS   1,1
+PSFVAR_DEGREES  2
+SAMPLE_AUTOSELECT  Y
+SAMPLEVAR_TYPE     SEEING
+SAMPLE_FWHMRANGE   2.0,8.0
+SAMPLE_VARIABILITY 0.3
+SAMPLE_MINSN       30.0
+SAMPLE_MAXELLIP    0.18
+SAMPLE_FLAGMASK    0x00fc
+OUTCAT_TYPE        FITS_LDAC
+CHECKPLOT_DEV       NULL
+CHECKIMAGE_TYPE     NONE
+WRITE_XML           N
+VERBOSE_TYPE        QUIET
+NTHREADS            0
