@@ -54,6 +54,12 @@ INSTRUMENTS = {
     'euclid_nisp_y': {'pix': 0.10,  'psfex': 'psfex_euclid_nisp.psfex', 'label': 'Euclid NISP Y'},
     'euclid_nisp_j': {'pix': 0.10,  'psfex': 'psfex_euclid_nisp.psfex', 'label': 'Euclid NISP J'},
     'euclid_nisp_h': {'pix': 0.10,  'psfex': 'psfex_euclid_nisp.psfex', 'label': 'Euclid NISP H'},
+    # HSC SSP s23b deepCoadd (LSST calexp), 0.168"/px; HST-ACS PSFEx config.
+    'hsc_g': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC g'},
+    'hsc_r': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC r'},
+    'hsc_i': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC i'},
+    'hsc_z': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC z'},
+    'hsc_y': {'pix': 0.168, 'psfex': 'psfex_hst_acs.psfex', 'label': 'HSC y'},
 }
 PIX        = 0.10      # arcsec/pixel — overwritten per-instrument in main()
 _PSFEX_CFG = 'psfex_euclid_vis.psfex'  # overwritten per-instrument in main()
@@ -110,6 +116,9 @@ def ensure_outcat(psf_dir: Path, band: str, reuse: bool) -> Path:
         fr = m.get('sample_fwhmrange')
         if fr:
             cmd += ['-SAMPLE_FWHMRANGE', f'{fr[0]:.2f},{fr[1]:.2f}']
+        sm = m.get('snr_min')        # HSC's compressed SNR floor (else 100 rejects all)
+        if sm:
+            cmd += ['-SAMPLE_MINSN', f'{float(sm):.1f}']
     print(f'  PSFEx → {outcat.name}', flush=True)
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
@@ -201,7 +210,7 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
                           cs=None, snr=None, elon=None, flg=None, n1=None,
                           xx=None, yy=None, accepted_xy=None,
                           upper_bright=None, bright_pivot=None,
-                          psf_fwhm_px=0.0, sat_onset_mag=None):
+                          psf_fwhm_px=0.0, sat_onset_mag=None, snr_min=100.0):
     """Render mag-vs-half-light-radius with the SAME PSF-star definition
     that 54_ uses, so the red dots match the actual ~hundreds of PSF
     candidates (not the ~30k point-source-like detections in the field)."""
@@ -216,7 +225,7 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
     psf_star = good & (fr > cut_px) & (fr < locus_px + 2.5*std_px) & (fwhm > 0) \
                & (~saturated) & (~edge) & (~contaminated)
     if cs is not None: psf_star &= (cs > 0.8)
-    if snr is not None: psf_star &= (snr > 100)
+    if snr is not None: psf_star &= (snr > snr_min)
     if elon is not None: psf_star &= (elon < 1.5)
 
     # Split into PSFEx-accepted (solid) vs PSFEx-rejected (open) using the
@@ -300,6 +309,8 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
 
 
 def plot_mag_vs_chi2(out_png, mag_acc, chi2_acc, n1_acc, n3_acc, flg_acc, band_upper):
+    if np.asarray(mag_acc).size == 0:
+        print(f'  [skip] {out_png.name}: no accepted stars'); return
     rainbow = ['#1f4eea','#5eb6ff','#00b300','#90ee90','#ff7f0e','#d62728']
     dcmap = ListedColormap(rainbow)
     bounds = [-0.5,0.5,1.5,2.5,3.5,4.5,5.5]
@@ -570,10 +581,12 @@ def plot_psf_mosaics(out_samp_png, out_resi_png, samp, resi, ocd,
 
 
 def plot_hist_n(out_png, n_arr, mask_flags_lt2, band_upper):
+    if int(np.asarray(mask_flags_lt2).sum()) == 0:
+        print(f'  [skip] {out_png.name}: no FLAGS<2 candidates'); return
     means = {r: n_arr[r][mask_flags_lt2].mean() for r in [1,2,3,4,5]}
     n1c, n3c, n5c = n_arr[1][mask_flags_lt2], n_arr[3][mask_flags_lt2], n_arr[5][mask_flags_lt2]
     fig, ax = plt.subplots(figsize=(11, 7))
-    bins = np.arange(0, max(n5c.max(), 30)+1) - 0.5
+    bins = np.arange(0, max(int(n5c.max()) if n5c.size else 0, 30)+1) - 0.5
     ax.hist(n1c, bins=bins, color='red',   alpha=0.55,
             label=f'$n_1$ (1″)  N={mask_flags_lt2.sum()}',
             edgecolor='darkred', lw=0.8)
@@ -664,6 +677,7 @@ def main():
     bright_pivot = _m.get('bright_pivot_mag')      # None for non-NISP builds
     psf_fwhm_est = float(_m.get('psf_fwhm_est_px', _m.get('psf_fwhm_px', 0.0)))
     sat_onset    = _m.get('sat_onset_mag')
+    snr_min_meta = float(_m.get('snr_min', 100.0))   # HSC uses a lower floor
     print(f'  (from meta) locus={locus:.3f} px = {locus*PIX:.3f}"  cut={cut:.3f} px  '
           f'upper={upper:.3f} px  anchor={_m.get("locus_anchor","?")}'
           + (f'  bright_pivot={bright_pivot} upper_bright={upper_bright:.3f}'
@@ -735,7 +749,8 @@ def main():
                           cs=cs, snr=snr, elon=elon, flg=flg, n1=n1_all,
                           xx=cx, yy=cy, accepted_xy=accepted_xy,
                           upper_bright=upper_bright, bright_pivot=bright_pivot,
-                          psf_fwhm_px=psf_fwhm_est, sat_onset_mag=sat_onset)
+                          psf_fwhm_px=psf_fwhm_est, sat_onset_mag=sat_onset,
+                          snr_min=snr_min_meta)
     print(f'     mag_vs_halflight.png')
 
     # mag-vs-chi2 should plot ALL PSFEx-accepted stars (not just in-mosaic);
