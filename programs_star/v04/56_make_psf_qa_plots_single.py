@@ -49,6 +49,11 @@ WORK    = Path('/Volumes/exdisk1/data/photometry_v04')
 INSTRUMENTS = {
     'euclid_vis':    {'pix': 0.10,  'psfex': 'psfex_euclid_vis.psfex', 'label': 'Euclid VIS'},
     'hst_acs_f814w': {'pix': 0.030, 'psfex': 'psfex_hst_acs.psfex',    'label': 'HST ACS F814W'},
+    # Euclid NISP (Y/J/H) — MER mosaics resampled to 0.10"/px (native 0.30");
+    # built by 54_..._euclid.py --band; uses the NISP-tuned PSFEx config.
+    'euclid_nisp_y': {'pix': 0.10,  'psfex': 'psfex_euclid_nisp.psfex', 'label': 'Euclid NISP Y'},
+    'euclid_nisp_j': {'pix': 0.10,  'psfex': 'psfex_euclid_nisp.psfex', 'label': 'Euclid NISP J'},
+    'euclid_nisp_h': {'pix': 0.10,  'psfex': 'psfex_euclid_nisp.psfex', 'label': 'Euclid NISP H'},
 }
 PIX        = 0.10      # arcsec/pixel — overwritten per-instrument in main()
 _PSFEX_CFG = 'psfex_euclid_vis.psfex'  # overwritten per-instrument in main()
@@ -191,7 +196,9 @@ def neighbour_counts(xx, yy, tree, radii_arcsec):
 def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
                           mad_px, cut_px, std_px, band_upper,
                           cs=None, snr=None, elon=None, flg=None, n1=None,
-                          xx=None, yy=None, accepted_xy=None):
+                          xx=None, yy=None, accepted_xy=None,
+                          upper_bright=None, bright_pivot=None,
+                          psf_fwhm_px=0.0, sat_onset_mag=None):
     """Render mag-vs-half-light-radius with the SAME PSF-star definition
     that 54_ uses, so the red dots match the actual ~hundreds of PSF
     candidates (not the ~30k point-source-like detections in the field)."""
@@ -218,13 +225,35 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
         psf_accepted = psf_star & (d < 1.0)   # within 1 px = same source
     psf_rejected = psf_star & (~psf_accepted)
 
+    # ── Bright-end shape override ──
+    # PSFEx χ²-flags the highest-S/N stars because they out-resolve the
+    # empirical PSF model (a few-% floor, irreducible for the resampled NISP
+    # MER), NOT because they are bad.  Reinstate a bright (mag < bright_pivot)
+    # PSFEx-rejected candidate as an accepted PSF anchor when its shape is
+    # INDEPENDENTLY stellar: FLUX_RADIUS on the (bright) locus, FWHM consistent
+    # with the PSF, and low ellipticity.  Faint rejections are left untouched.
+    override = np.zeros_like(psf_star)
+    if bright_pivot is not None and psf_fwhm_px > 0:
+        ub = upper_bright if upper_bright is not None else (locus_px + 3.0*mad_px)
+        override = (psf_rejected & (mag < bright_pivot)
+                    & (fr > cut_px) & (fr < ub)
+                    & (np.abs(fwhm - psf_fwhm_px) < 0.15 * psf_fwhm_px)
+                    & (ell < 0.10))
+        psf_accepted = psf_accepted | override
+        psf_rejected = psf_star & (~psf_accepted)
+    pure_acc = psf_accepted & (~override)
+
     fig, ax = plt.subplots(figsize=(11, 8.5))
     gd = good & (fr > 0)
     sc = ax.scatter(mag[gd], fr[gd]*PIX, s=10, c=ell[gd], cmap='rainbow_r',
                     vmin=0, vmax=0.8, alpha=0.6, rasterized=True, linewidths=0)
-    ax.scatter(mag[psf_accepted], fr[psf_accepted]*PIX, s=28, c='red',
+    ax.scatter(mag[pure_acc], fr[pure_acc]*PIX, s=28, c='red',
                edgecolor='k', lw=0.4, zorder=7,
-               label=f'PSFEx accepted ({psf_accepted.sum()})')
+               label=f'PSFEx accepted ({pure_acc.sum()})')
+    if override.sum():
+        ax.scatter(mag[override], fr[override]*PIX, s=48, c='red',
+                   edgecolor='darkorange', lw=1.7, zorder=8,
+                   label=f'Bright, shape-validated override ({override.sum()})')
     ax.scatter(mag[psf_rejected], fr[psf_rejected]*PIX, s=40, facecolor='none',
                edgecolor='red', lw=1.2, alpha=0.7, zorder=6,
                label=f'Candidate, PSFEx-rejected ({psf_rejected.sum()})')
@@ -237,6 +266,9 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
                label=f'Stellar locus = {locus_px*PIX:.3f}″ ({locus_px:.2f} px)')
     ax.axhline(cut_px*PIX, color='blue', ls='-', lw=2.0, alpha=0.9,
                label=f'Artifact cut = locus−3·MAD = {cut_px*PIX:.3f}″ ({cut_px:.2f} px)')
+    if sat_onset_mag is not None:
+        ax.axvline(sat_onset_mag, color='purple', ls=':', lw=1.8, alpha=0.85,
+                   label=f'Saturation onset = {sat_onset_mag:.2f} mag (bright limit)')
     ax.set_xlabel(f'MAG_AUTO ({band_upper}, AB)', fontsize=15, family='serif')
     ax.set_ylabel('Half-light radius FLUX_RADIUS [arcsec]', fontsize=15, family='serif')
     ax.set_ylim(0, 0.55); ax.set_xlim(13.5, 30.5)
@@ -615,9 +647,24 @@ def main():
     peak, ncoremask = compute_peak_and_ncoremask(sci, xx, yy, half=2)
     print(f'  masked-core sources: {(ncoremask>0).sum()}')
 
-    # 4. stellar-locus + artifact-cut
-    locus, mad, cut, std0 = compute_locus_and_cut(fr, cs, snr, flg, elon, fwhm)
-    print(f'  locus={locus:.3f} px, MAD={mad:.3f} px, cut={cut:.3f} px')
+    # 4. stellar-locus + artifact-cut — READ FROM THE META (54_'s authoritative
+    #    values, e.g. Gaia-anchored for NISP) so the plotted lines MATCH the
+    #    build's selection.  Do NOT recompute here (that re-introduced the old
+    #    CLASS_STAR locus, which disagreed with the Gaia-anchored build).
+    locus = float(_m['stellar_locus_px'])
+    mad   = float(_m.get('locus_mad_sigma_px', 0.0))
+    cut   = float(_m['artifact_cut_px'])
+    upper = float(_m.get('upper_px', locus + 2.5 * float(_m.get('locus_std_px', 0.0))))
+    std0  = (upper - locus) / 2.5      # so the plot's (locus + 2.5*std0) == upper
+    # bright-end shape-override params (NISP builds record these; absent → no override)
+    upper_bright = float(_m.get('upper_bright_px', upper))
+    bright_pivot = _m.get('bright_pivot_mag')      # None for non-NISP builds
+    psf_fwhm_est = float(_m.get('psf_fwhm_est_px', _m.get('psf_fwhm_px', 0.0)))
+    sat_onset    = _m.get('sat_onset_mag')
+    print(f'  (from meta) locus={locus:.3f} px = {locus*PIX:.3f}"  cut={cut:.3f} px  '
+          f'upper={upper:.3f} px  anchor={_m.get("locus_anchor","?")}'
+          + (f'  bright_pivot={bright_pivot} upper_bright={upper_bright:.3f}'
+             if bright_pivot is not None else ''))
 
     # 5. neighbour counts
     tree = cKDTree(np.column_stack([xx, yy]))
@@ -683,7 +730,9 @@ def main():
                           mag, fr, fwhm, ell, ncoremask, locus, mad, cut, std0,
                           band_upper,
                           cs=cs, snr=snr, elon=elon, flg=flg, n1=n1_all,
-                          xx=cx, yy=cy, accepted_xy=accepted_xy)
+                          xx=cx, yy=cy, accepted_xy=accepted_xy,
+                          upper_bright=upper_bright, bright_pivot=bright_pivot,
+                          psf_fwhm_px=psf_fwhm_est, sat_onset_mag=sat_onset)
     print(f'     mag_vs_halflight.png')
 
     # mag-vs-chi2 should plot ALL PSFEx-accepted stars (not just in-mosaic);
@@ -726,13 +775,11 @@ def main():
     print(f'     psf_samples.png / psf_residuals.png  '
           f'(total accepted={n_accepted_total})')
 
-    # FLAGS<2 PSF candidates
-    base = (cs > 0.8) & (snr > 100) & (flg < 2) & (elon < 1.5) & (fr > 0)
-    locus_m, mad_m, cut_m, std0_m = compute_locus_and_cut(fr, cs, snr, flg, elon, fwhm)
+    # FLAGS<2 PSF candidates — same band as 54_ ([cut, upper] from the meta)
     saturated = ncoremask > 0
     edge = (flg & 8) > 0
     candidate = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
-                 & (fr > cut_m) & (fr < locus_m + 2.5*std0_m)
+                 & (fr > cut) & (fr < upper)
                  & (~saturated) & (~edge))
     cand_flg_lt2 = candidate & (flg < 2)
     plot_hist_n(psf_dir / 'hist_n_means.png',

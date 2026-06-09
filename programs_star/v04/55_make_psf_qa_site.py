@@ -46,6 +46,9 @@ BANDS = [
     ('F277W', 'JWST NIRCam F277W (LW)', 'jwst_nircam_f277w'),
     ('F444W', 'JWST NIRCam F444W (LW)', 'jwst_nircam_f444w'),
     ('VIS',   'Euclid VIS',             'euclid_vis'),
+    ('NISP-Y', 'Euclid NISP Y',          'euclid_nisp_y'),
+    ('NISP-J', 'Euclid NISP J',          'euclid_nisp_j'),
+    ('NISP-H', 'Euclid NISP H',          'euclid_nisp_h'),
 ]
 
 # canonical plot filenames (after symlinking into the site)

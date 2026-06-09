@@ -1,0 +1,43 @@
+# PSFEx config for Euclid NISP (Y/J/H) on the MER mosaics.
+#
+# NISP physics (vs VIS): native 0.30"/px, PSF FWHM 1.10/1.17/1.19 px (Y/J/H,
+# Moffat) = 0.33/0.35/0.36" -> STRONGLY undersampled.  MER resamples NISP
+# 0.30"->0.10" (3x), broadening the effective PSF to ~0.5" (~5 px on the MER
+# grid) and giving a sub-pixel-phase-dependent, strongly field-varying PSF
+# plus correlated noise.  Tuning (validated by a sampling×degree sweep on
+# tile 101541375, 208 stars):
+#   * PSF_SAMPLING 0.5 — 2x oversample to reconstruct the undersampled NISP
+#     PSF from the sub-pixel-phase diversity of the star ensemble (native
+#     sampling 1.0 gave chi2 7.0-7.2; 0.5 gave 5.9-4.2).
+#   * PSFVAR_DEGREES 3 — NISP PSF varies strongly across the MER tile
+#     (chi2: deg1=5.86, deg2=4.69, deg3=4.16 at sampling 0.5).
+#   * PSF_SIZE 81,81 oversampled (=40 native px = 4") — full ~0.5" core+wings.
+# Residual chi2 ~4 is dominated by the MER resampling's correlated noise
+# (the WEIGHT NONE per-pixel noise model assumes independent pixels); the PSF
+# SHAPE is well-recovered (FWHM 0.53").
+BASIS_TYPE      PIXEL_AUTO
+BASIS_NUMBER    20
+PSF_SAMPLING    0.5
+PSF_ACCURACY    0.01
+PSF_SIZE        81,81
+CENTER_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PHOTFLUX_KEY    FLUX_APER(1)
+PHOTFLUXERR_KEY FLUXERR_APER(1)
+PSFVAR_KEYS     XWIN_IMAGE,YWIN_IMAGE
+PSFVAR_GROUPS   1,1
+PSFVAR_DEGREES  3
+SAMPLE_AUTOSELECT  Y      # keep autoselect (clips broad objects → tight PSF);
+                          # bright-star inclusion is handled by the correct GAIN
+                          # (Poisson noise term) so they no longer chi2-clip.
+SAMPLEVAR_TYPE     SEEING
+SAMPLE_FWHMRANGE   3.0,12.0
+SAMPLE_VARIABILITY 0.3
+SAMPLE_MINSN       100.0
+SAMPLE_MAXELLIP    0.18
+SAMPLE_FLAGMASK    0x00fc
+OUTCAT_TYPE        FITS_LDAC
+CHECKPLOT_DEV       NULL
+CHECKIMAGE_TYPE     NONE
+WRITE_XML           N
+VERBOSE_TYPE        QUIET
+NTHREADS            0

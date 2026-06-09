@@ -46,7 +46,7 @@ JWST_BANDS = ['f115w', 'f150w', 'f277w', 'f444w']
 # The copy-based builders are I/O-heavy (read i2d SCI+WHT, write sci_/wht_,
 # SExtractor re-reads), so the big missions stay modest; small Euclid frames
 # tolerate more.
-DEFAULT_JOBS = {'jwst': 3, 'hst': 3, 'euclid': 6}
+DEFAULT_JOBS = {'jwst': 3, 'hst': 3, 'euclid': 6, 'euclid_nisp': 6}
 
 # big per-tile intermediates to delete once the model + plots + meta exist,
 # so a 160-tile run doesn't pile up ~1 TB on the scratch disk.  Kept: the .psf
@@ -60,6 +60,13 @@ _lock = threading.Lock()
 def euclid_tiles():
     return sorted({p.name.split('TILE')[1].split('-')[0]
                    for p in EUC.glob('EUC_MER_BGSUB-MOSAIC-VIS_TILE*.fits')})
+
+
+def nisp_tiles():
+    # NISP shares the MER tiling with VIS; coverage is patchier (only ~20/60
+    # tiles are well-covered), but the builder handles sparse tiles gracefully.
+    return sorted({p.name.split('TILE')[1].split('-')[0]
+                   for p in EUC.glob('EUC_MER_BGSUB-MOSAIC-NIR-Y_TILE*.fits')})
 
 
 def build_worklist(missions):
@@ -100,6 +107,18 @@ def build_worklist(missions):
                            '--instrument', inst, '--tile', t],
                 plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
                           '--instrument', inst, '--tile', t]))
+    if 'euclid_nisp' in missions:
+        for t in nisp_tiles():
+            for b in ('y', 'j', 'h'):                     # NISP Y/J/H
+                inst = f'euclid_nisp_{b}'
+                meta = WORK / inst / t / 'psf' / f'psf_{t}.meta.json'
+                items.append(dict(
+                    mission='euclid_nisp', instrument=inst, tile=t, band=b, suffix=t,
+                    meta=meta,
+                    build_cmd=[PY, str(HERE / '54_step3a_build_psf_model_euclid.py'),
+                               '--band', b, '--tile', t],
+                    plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
+                              '--instrument', inst, '--tile', t]))
     return items
 
 
@@ -196,6 +215,8 @@ def parse_args():
                    help='comma list of tile:band to skip, e.g. A2:f115w,B4:f115w')
     p.add_argument('--bands', default='',
                    help='comma list of bands to keep (e.g. f115w,f150w); others dropped')
+    p.add_argument('--tiles', default='',
+                   help='comma list of tile ids to keep (e.g. 101541375 or A4); others dropped')
     return p.parse_args()
 
 
@@ -212,6 +233,10 @@ def main():
     if keepb:
         all_items = [it for it in all_items if it['band'] in keepb]
         print(f'bands kept: {sorted(keepb)}')
+    keept = {t.strip() for t in args.tiles.split(',') if t.strip()}
+    if keept:
+        all_items = [it for it in all_items if it['tile'] in keept]
+        print(f'tiles kept: {sorted(keept)}')
     print(f'mass production: missions={missions}  total items={len(all_items)}')
     print(f'timing CSV → {TIMING_CSV}')
     grand_ok = grand_fail = 0
