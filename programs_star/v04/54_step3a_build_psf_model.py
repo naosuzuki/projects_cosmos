@@ -75,6 +75,7 @@ from astropy.io import fits
 PROJECT  = Path('/Users/suzuki/github/projects_cosmos')
 CONFIGS  = PROJECT / 'configs'
 JWST_DIR = Path('/Volumes/exdisk1/data/JWST/COSMOS_v0.8')
+SCIDIR   = JWST_DIR / 'scidir'   # pre-extracted single-HDU _sci.fits fallback
 WORK     = Path('/Volumes/exdisk1/data/photometry_v04')
 
 # SW = short-wavelength (F115W, F150W); LW = long (F277W, F444W)
@@ -113,42 +114,78 @@ def zp_from_pixar(image):
     sys.exit('No PIXAR_SR for ZP')
 
 
+def resolve_source(tile, band):
+    """Resolve the SExtractor source + the in-memory SCI for the pixel work,
+    WITHOUT writing redundant sci_/wht_ copies (copy-elimination; SExtractor
+    reads the i2d SCI=ext1 / WHT=ext4 directly — validated bit-identical to
+    the extracted copies, 80898=80898 on A4/F115W).
+
+    Falls back to the pre-extracted scidir single-HDU _sci.fits (run WEIGHTLESS)
+    when the i2d is ABSENT or TRUNCATED — a few f115w i2d downloads are short on
+    their WHT extension (A2/A10/B4/B6); scidir has the complete SCI for all.
+
+    Returns (sex_image, sex_weight|None, sci_array, zp, sci_file, sci_ext).
+    """
+    i2d = JWST_DIR / f'mosaic_nircam_{band}_COSMOS-Web_30mas_{tile}_v1.0_i2d.fits'
+    if i2d.exists():
+        try:
+            with fits.open(i2d) as h:
+                _ = h['WHT'].header['NAXIS1']           # raises if WHT truncated/missing
+                sci = h['SCI'].data.astype(np.float32)
+            return f'{i2d}[1]', f'{i2d}[4]', sci, zp_from_pixar(i2d), str(i2d), 1
+        except Exception as e:
+            print(f'  [warn] i2d unusable ({type(e).__name__}); using scidir (weightless)')
+    # prefer the v1.0 SCI (consistent with the v1.0 wht/err), fall back to v0_8
+    matches = (sorted(SCIDIR.glob(
+                   f'mosaic_nircam_{band}_COSMOS-Web_30mas_{tile}_v1.0_sci.fits'))
+               or sorted(SCIDIR.glob(
+                   f'mosaic_nircam_{band}_COSMOS-Web_30mas_{tile}_v*_sci.fits')))
+    if not matches:
+        sys.exit(f'No usable i2d and no scidir _sci.fits for {tile} {band}')
+    sf = matches[0]
+    sci = fits.open(sf)[0].data.astype(np.float32)
+    # use the matching scidir WHT extension as the weight map if present
+    # (fetched by 05_download_jwst_nircam_extensions.py); else run weightless.
+    whts = sorted(SCIDIR.glob(
+        f'mosaic_nircam_{band}_COSMOS-Web_30mas_{tile}_v*_wht.fits'))
+    sex_wht = str(whts[0]) if whts else None
+    print(f'  (scidir: SCI {sf.name}, '
+          f'{"WHT " + whts[0].name + " (weighted)" if sex_wht else "weightless"})')
+    return str(sf), sex_wht, sci, zp_from_pixar(sf), str(sf), 0
+
+
 def main():
     args = parse_args()
     band = args.filter
     chan = 'sw' if band in SW_BANDS else 'lw'
     out  = WORK / args.instrument / args.tile / 'psf'
     out.mkdir(parents=True, exist_ok=True)
-    img  = band_image(args.tile, band)
-    zp   = zp_from_pixar(img)
+    sex_img, sex_wht, sci, zp, sci_file, sci_ext = resolve_source(args.tile, band)
 
     print(f'Instrument : {args.instrument}   ({chan.upper()} channel)')
     print(f'Tile/band  : {args.tile} / {band.upper()}   ZP_AB={zp:.4f}')
+    print(f'Source     : {sex_img}   weight={sex_wht or "NONE"}')
     print(f'PSF config : psfex_jwst_{chan}.psfex   param: pass1_jwst_{chan}.param')
 
-    # ── 1. extract SCI+WHT single-HDU, run SExtractor pass 1 ──
-    with fits.open(img) as h:
-        sci = h['SCI'].data.astype(np.float32)
-        sci_hdr = h['SCI'].header
-        wht = h['WHT'].data.astype(np.float32)
-        wht_hdr = h['WHT'].header
-    sci_path = out / f'sci_{band}.fits'
-    wht_path = out / f'wht_{band}.fits'
-    fits.PrimaryHDU(sci, sci_hdr).writeto(sci_path, overwrite=True)
-    fits.PrimaryHDU(wht, wht_hdr).writeto(wht_path, overwrite=True)
-
+    # ── 1. SExtractor pass 1 — reads the i2d SCI/WHT extensions (or scidir
+    #       _sci.fits) DIRECTLY; no redundant sci_/wht_ copies written.  The
+    #       masked-core / gap pixel work below still uses the in-memory `sci`
+    #       (the validated SCI-based logic — no VIGNET). ──
     cat1 = out / f'pass1_{band}.fits'
     if not (args.reuse_pass1 and cat1.exists()):
         print('\n── SExtractor pass 1 (detection + big VIGNET) ──', flush=True)
-        cmd = ['sex', str(sci_path),
+        cmd = ['sex', sex_img,
                '-c', str(CONFIGS / f'{args.instrument}.sex'),
                '-CATALOG_NAME', str(cat1),
                '-PARAMETERS_NAME', str(CONFIGS / f'pass1_jwst_{chan}.param'),
                '-FILTER_NAME', str(CONFIGS / 'default.conv'),
                '-STARNNW_NAME', str(CONFIGS / 'default.nnw'),
-               '-WEIGHT_IMAGE', str(wht_path),
                '-MAG_ZEROPOINT', f'{zp:.4f}',
                '-VERBOSE_TYPE', 'QUIET']
+        if sex_wht is not None:
+            cmd += ['-WEIGHT_IMAGE', sex_wht, '-WEIGHT_TYPE', 'MAP_WEIGHT']
+        else:
+            cmd += ['-WEIGHT_TYPE', 'NONE']
         t0 = time.time()
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
@@ -338,6 +375,7 @@ def main():
         'created_utc_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         'instrument': args.instrument, 'tile': args.tile, 'filter': band,
         'channel': chan, 'zp_ab': float(zp),
+        'sci_source_file': sci_file, 'sci_source_ext': int(sci_ext),
         'psf_fwhm_est_px': float(psf_fwhm_est),
         'sample_fwhmrange': [float(fwhm_lo), float(fwhm_hi)],
         'stellar_locus_px': float(med), 'locus_std_px': float(std),

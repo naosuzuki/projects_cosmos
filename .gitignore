@@ -112,3 +112,5 @@ _progress_state.json
 .env
 .venv/
 node_modules/
+psfex_out.cat
+**/psfex_out.cat

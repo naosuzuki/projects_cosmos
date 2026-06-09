@@ -535,7 +535,7 @@ def plot_hist_n(out_png, n_arr, mask_flags_lt2, band_upper):
     ax.set_ylabel('Number of PSF candidates (FLAGS<2)', fontsize=15, family='serif')
     ax.set_title(f'Neighbour-Count Distributions for FLAGS<2 PSF Candidates ({band_upper}).  '
                  f'N={mask_flags_lt2.sum()}.', fontsize=13, family='serif')
-    ax.set_xlim(-0.7, max(20, n5c.max()+1)+0.5)
+    ax.set_xlim(-0.7, 30)        # uniform x-max=30 across HST/JWST/Euclid
     ax.legend(loc='upper right', fontsize=10, framealpha=0.92)
     ax.grid(alpha=0.25)
     ax.tick_params(which='both', direction='in', top=True, right=True,
@@ -577,8 +577,13 @@ def main():
     yy  = np.asarray(pass1['Y_IMAGE'], float)
     print(f'  pass-1 detections: {len(pass1)}')
 
-    # 3. SCI for peak + ncoremask
-    sci = fits.getdata(psf_dir / f'sci_{band}.fits').astype(np.float32)
+    # 3. SCI for peak + ncoremask — read from the source recorded by 54_
+    #    (i2d SCI ext, or scidir _sci.fits); no sci_ copy is written anymore.
+    import json as _json
+    _m = _json.loads((psf_dir / f'psf_{band}.meta.json').read_text())
+    _scf = _m.get('sci_source_file'); _sce = int(_m.get('sci_source_ext', 0))
+    sci = (fits.getdata(_scf, ext=_sce) if _scf
+           else fits.getdata(psf_dir / f'sci_{band}.fits')).astype(np.float32)
     print(f'  SCI shape: {sci.shape}')
     peak, ncoremask = compute_peak_and_ncoremask(sci, xx, yy, half=2)
     print(f'  masked-core sources: {(ncoremask>0).sum()}')

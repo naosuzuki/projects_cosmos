@@ -57,8 +57,10 @@ def parse_args():
 
 
 def find_tile_image(tile_id: str) -> Path:
-    matches = list(HST_ROOT.glob(
-        f'mosaic_cosmos_web_2023apr_30mas_tile_{tile_id}_hst_acs_wfc_f814w_drz.fits'))
+    # NOTE: the date token differs by tiling epoch — A-tiles are "2023apr",
+    # B-tiles are "2024jan" — so glob it with a wildcard, not a hardcoded date.
+    matches = sorted(HST_ROOT.glob(
+        f'mosaic_cosmos_web_*_30mas_tile_{tile_id}_hst_acs_wfc_f814w_drz.fits'))
     if not matches:
         sys.exit(f'No HST ACS/WFC F814W image matches tile {tile_id} in {HST_ROOT}')
     return matches[0]
@@ -81,14 +83,13 @@ def main():
     print(f'Tile       : {args.tile}   ZP_AB={zp:.4f}   PIX={PIX_HST}″')
     print(f'Image      : {img.name}  shape={sci.shape}')
 
-    # write a single-HDU SCI file for SExtractor input
-    sci_path = out / f'sci_{args.tile}.fits'
-    fits.PrimaryHDU(sci, hdr).writeto(sci_path, overwrite=True)
-
+    # SExtractor reads the original single-HDU drz mosaic DIRECTLY — no sci_
+    # copy.  The in-memory `sci` (already loaded above) drives the masked-core
+    # / saturation pixel work.
     cat1 = out / f'pass1_{args.tile}.fits'
     if not (args.reuse_pass1 and cat1.exists()):
         print('\n── SExtractor pass 1 ──', flush=True)
-        cmd = ['sex', str(sci_path),
+        cmd = ['sex', str(img),
                '-c', str(CONFIGS / 'hst_acs_f814w.sex'),
                '-CATALOG_NAME', str(cat1),
                '-PARAMETERS_NAME', str(CONFIGS / 'pass1_hst_acs.param'),
@@ -250,6 +251,7 @@ def main():
         'created_utc_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         'instrument': args.instrument, 'tile': args.tile,
         'zp_ab': zp, 'pixel_scale_arcsec': PIX_HST,
+        'sci_source_file': str(img), 'sci_source_ext': 0,
         'psf_fwhm_est_px': float(psf_fwhm_est),
         'sample_fwhmrange': [float(fwhm_lo), float(fwhm_hi)],
         'stellar_locus_px': float(med), 'locus_std_px': float(std0),
