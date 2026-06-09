@@ -70,6 +70,18 @@ PILOT_SRC = {
 }
 
 
+def _natkey(name: str):
+    """Natural sort key so tiles order A1,A2,..,A9,A10,B1,..,B10 (numeric-aware)
+    rather than lexicographic A1,A10,A2.  Euclid numeric IDs sort numerically too.
+    Each chunk is a (rank,int,str) tuple so digit/non-digit chunks never compare
+    str-vs-int (stray non-tile dir entries would otherwise raise TypeError)."""
+    import re
+    out = []
+    for t in re.findall(r'\d+|\D+', name):
+        out.append((0, int(t), '') if t.isdigit() else (1, 0, t))
+    return out
+
+
 def discover_tiles(instrument: str) -> list[str]:
     """Find tiles processed for a given instrument.
 
@@ -80,7 +92,7 @@ def discover_tiles(instrument: str) -> list[str]:
     if not inst_root.exists():
         return []
     tiles = []
-    for p in sorted(inst_root.iterdir()):
+    for p in sorted(inst_root.iterdir(), key=lambda p: _natkey(p.name)):
         if not p.is_dir(): continue
         psf = p / 'psf'
         if not psf.exists(): continue
