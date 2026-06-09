@@ -88,7 +88,7 @@ def ensure_outcat(psf_dir: Path, band: str, reuse: bool) -> Path:
     otherwise the config default range would reject bright stars here
     that 54_ accepted (the FWHM-range bug).
     """
-    import json
+    import json, tempfile
     outcat = psf_dir / f'outcat_{band}.fits'
     if reuse and outcat.exists():
         print(f'  reuse OUTCAT: {outcat.name}')
@@ -99,6 +99,9 @@ def ensure_outcat(psf_dir: Path, band: str, reuse: bool) -> Path:
         '-OUTCAT_TYPE', 'FITS_LDAC',
         '-OUTCAT_NAME', str(outcat),
         '-CHECKIMAGE_TYPE', 'NONE',  # check images already exist from 54_
+        # this re-run is only for per-star FLAGS_PSF; send its .psf to a temp
+        # dir so it cannot clobber 54_'s pass-2 (bright-anchored) PSF model.
+        '-PSF_DIR', tempfile.gettempdir(),
     ]
     # match 54_'s per-band FWHM range from the meta JSON
     meta_f = psf_dir / f'psf_{band}.meta.json'

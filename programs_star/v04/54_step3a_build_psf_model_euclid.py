@@ -183,6 +183,20 @@ def main():
     is_point = (cs > 0.8) & (snr > 100)
     peak = core_peak(sci, xx, yy, half=2, idx=np.where(is_point)[0])
     sat_peak_level, onset_mag = detect_saturation(mag, peak, masked_core, is_point)
+    # Robustify: the peak-counts plateau is unreliable on sparse / partially
+    # covered tiles, where it can land at 18-24 mag (vetoing all good stars).
+    # Saturation is a detector property (~constant per band), so clamp an
+    # out-of-range onset to the per-band default and disable the (then equally
+    # unreliable) peak-plateau veto — the onset-mag cut + masked-core remain.
+    SAT_RANGE = (13.5, 17.0)
+    SAT_DEFAULT = {'y': 15.0, 'j': 15.5, 'h': 15.5}     # NISP only; VIS untouched
+    if args.band in SAT_DEFAULT and (
+            onset_mag is None or not (SAT_RANGE[0] <= onset_mag <= SAT_RANGE[1])):
+        fb = SAT_DEFAULT[args.band]
+        print(f'  saturation onset {onset_mag} out of range {SAT_RANGE} → '
+              f'fallback {fb} mag, peak-plateau veto disabled')
+        onset_mag = fb
+        sat_peak_level = np.inf
     peak_saturated = np.isfinite(peak) & (peak >= sat_peak_level)
     saturated = (masked_core > 0) | peak_saturated
     print(f'  saturation: masked-core={int((masked_core>0).sum())}  '
@@ -286,33 +300,78 @@ def main():
         print(f'  min FR among PSF stars            : {fr[star].min():.3f} px'
               f'  ({"OK" if fr[star].min() > cut else "FAIL"} > cut {cut:.3f})')
 
-    # write filtered LDAC
-    star_cat = out / f'stars_{args.tile}.fits'
-    hcat[2].data = obj[star]
-    hcat.writeto(star_cat, overwrite=True)
-    print(f'  wrote {star_cat.name} ({star.sum()} stars)')
+    # ── two-pass PSFEx ──
+    # Pass 1 (default PSF_ACCURACY) cleans the sample normally but χ²-rejects
+    # the highest-S/N stars — they out-resolve the empirical NISP model's ~1-2%
+    # floor, NOT because they are bad.  We then reinstate the SHAPE-VALIDATED
+    # bright ones (FR on locus, FWHM=PSF, low ellipticity) and rebuild the PSF
+    # from accepted∪override with PSF_ACCURACY relaxed (0.5) so those bright
+    # anchors are USED in the fit.  Relaxing PSF_ACCURACY only widens the
+    # cleaning tolerance — the model SHAPE (FWHM) is unchanged.
+    sel_idx = np.where(star)[0]
+    all_cat = out / f'stars_all_{args.tile}.fits'
+    hcat[2].data = obj[sel_idx]
+    hcat.writeto(all_cat, overwrite=True)
 
-    # ── PSFEx — dynamic SAMPLE_FWHMRANGE scaled to the measured PSF FWHM ──
     fwhm_lo = max(0.8, 0.6 * psf_fwhm_est)
     fwhm_hi = 2.5 * psf_fwhm_est
-    print('\n── PSFEx ──', flush=True)
+    print('\n── PSFEx pass 1 (validate) ──', flush=True)
     print(f'  SAMPLE_FWHMRANGE = {fwhm_lo:.2f},{fwhm_hi:.2f} px '
           f'(scaled to PSF FWHM {psf_fwhm_est:.2f})')
-    cmd = ['psfex', str(star_cat),
-           '-c', str(CONFIGS / psfexcfg),
+    p1out = out / f'p1outcat_{args.tile}.fits'
+    r = subprocess.run(['psfex', str(all_cat), '-c', str(CONFIGS / psfexcfg),
+                        '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
+                        '-OUTCAT_TYPE', 'FITS_LDAC', '-OUTCAT_NAME', str(p1out),
+                        '-CHECKIMAGE_TYPE', 'NONE'], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr[-1500:], file=sys.stderr); sys.exit('PSFEx pass1 failed')
+    oc1 = fits.open(p1out)
+    od1 = next(h.data for h in oc1 if h.data is not None
+               and getattr(h, 'columns', None) is not None and len(h.columns) > 2)
+    fpsf = np.asarray(od1['FLAGS_PSF'], int)
+    axy = np.column_stack([np.asarray(od1['X_IMAGE'], float)[fpsf == 0],
+                           np.asarray(od1['Y_IMAGE'], float)[fpsf == 0]])
+    s_x = xx[sel_idx]; s_y = yy[sel_idx]
+    if len(axy):
+        dd, _ = cKDTree(axy).query(np.column_stack([s_x, s_y])); s_acc = dd < 1.0
+    else:
+        s_acc = np.zeros(len(sel_idx), bool)
+    s_mag = mag[sel_idx]; s_fr = fr[sel_idx]; s_fwhm = fwhm[sel_idx]; s_ell = ell_arr[sel_idx]
+    s_override = ((~s_acc) & np.isfinite(s_mag) & (s_mag < bright_pivot)
+                  & (s_fr > cut) & (s_fr < upper_bright)
+                  & (np.abs(s_fwhm - psf_fwhm_est) < 0.15 * psf_fwhm_est)
+                  & (s_ell < 0.10))
+    model_mask = s_acc | s_override
+    n_acc = int(s_acc.sum()); n_ovr = int(s_override.sum()); n_mod = int(model_mask.sum())
+    print(f'  pass1: PSFEx-accepted {n_acc}, bright shape-override {n_ovr} '
+          f'→ model set {n_mod}')
+
+    # the model-star catalog IS stars_{tile} (the QA plotter reads this)
+    star_cat = out / f'stars_{args.tile}.fits'
+    hcat[2].data = obj[sel_idx][model_mask]
+    hcat.writeto(star_cat, overwrite=True)
+    print(f'  wrote {star_cat.name} ({n_mod} model stars: {n_acc} PSFEx + {n_ovr} bright anchors)')
+
+    print('── PSFEx pass 2 (final model, bright anchors retained) ──', flush=True)
+    cmd = ['psfex', str(star_cat), '-c', str(CONFIGS / psfexcfg),
            '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
+           '-PSF_ACCURACY', '0.5',
            '-CHECKIMAGE_TYPE', 'RESIDUALS,PROTOTYPES,SNAPSHOTS,SAMPLES',
            '-CHECKIMAGE_NAME',
            f'{out}/resi.fits,{out}/proto.fits,{out}/snap.fits,{out}/samp.fits']
     t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        print(r.stderr[-1500:], file=sys.stderr); sys.exit('PSFEx failed')
+        print(r.stderr[-1500:], file=sys.stderr); sys.exit('PSFEx pass2 failed')
     psf = star_cat.with_suffix('.psf')
     if not psf.exists():
         alt = Path.cwd() / psf.name
         if alt.exists(): shutil.move(alt, psf)
     ph = fits.open(psf)[1].header
+    # tidy pass-1 intermediates
+    for f in (all_cat, p1out, all_cat.with_suffix('.psf')):
+        try: f.unlink()
+        except OSError: pass
     print(f'  wall {time.time()-t0:.1f}s')
     print(f'  PSF model: chi2={ph.get("CHI2",-1):.3f}  '
           f'FWHM={ph.get("PSF_FWHM",-1):.2f} px  accepted={ph.get("ACCEPTED","?")}')
@@ -335,6 +394,10 @@ def main():
         'locus_anchor': ('gaia_dr3' if anchored else 'class_star'),
         'n_gaia_matched': int(gaia_star.sum()),
         'n_psf_stars': int(star.sum()),
+        'n_psfex_accepted': n_acc,
+        'n_override_bright': n_ovr,
+        'n_model_stars': n_mod,
+        'psf_accuracy_pass2': 0.5,
         'n_spike_stars_kept': int((star & (flg >= 2)).sum()),
         'n_saturated_excluded': int(saturated.sum()),
         'sat_peak_level': (None if not np.isfinite(sat_peak_level) else float(sat_peak_level)),
