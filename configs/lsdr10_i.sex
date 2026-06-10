@@ -1,4 +1,8 @@
-# SExtractor config — LS DR10 i (DECam, new in DR10).  Sibling of lsdr10_g.sex.
+# SExtractor config — DESI Legacy Surveys DR10 south (DECam) i band.
+# Brick coadds in nanomaggies (ZP_AB=22.5 exact); 0.262"/px, seeing ~1.0-1.4".
+# GAIN 0: flux-calibrated coadd -> photon term not derivable; background-RMS
+# noise model (validated WEIGHT NONE ground recipe).  Saturation comes from
+# the maskbits plane in the builder, not SATUR_LEVEL.
 
 CATALOG_TYPE     FITS_LDAC
 PARAMETERS_NAME  default.param
@@ -13,18 +17,18 @@ DEBLEND_MINCONT  0.005
 CLEAN            Y
 CLEAN_PARAM      1.0
 MASK_TYPE        CORRECT
-WEIGHT_TYPE      MAP_WEIGHT
+WEIGHT_TYPE      NONE
 WEIGHT_THRESH    0
-WEIGHT_GAIN      Y
-PHOT_APERTURES   8,12,20
+WEIGHT_GAIN      N
+PHOT_APERTURES   12,18,30
 PHOT_AUTOPARAMS  2.5,3.5
 PHOT_PETROPARAMS 2.0,3.5
-SATUR_LEVEL      1.0e10
+SATUR_LEVEL      1e9
 MAG_ZEROPOINT    22.5
 MAG_GAMMA        4.0
-GAIN             4.0
+GAIN             0.0
 PIXEL_SCALE      0.262
-SEEING_FWHM      1.1
+SEEING_FWHM      1.2
 STARNNW_NAME     default.nnw
 BACK_SIZE        64
 BACK_FILTERSIZE  3

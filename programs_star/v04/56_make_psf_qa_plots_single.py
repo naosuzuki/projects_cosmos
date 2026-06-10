@@ -82,6 +82,12 @@ INSTRUMENTS = {
     'hsc_i': {'pix': 0.168, 'psfex': 'psfex_hsc.psfex', 'label': 'HSC i'},
     'hsc_z': {'pix': 0.168, 'psfex': 'psfex_hsc.psfex', 'label': 'HSC z'},
     'hsc_y': {'pix': 0.168, 'psfex': 'psfex_hsc.psfex', 'label': 'HSC y'},
+    # DESI Legacy DR10 south (DECam) bricks, 0.262"/px; same pixel-sampling
+    # regime as HSC (~4-5 px FWHM) → reuses the HSC PSFEx config.
+    'lsdr10_g': {'pix': 0.262, 'psfex': 'psfex_hsc.psfex', 'label': 'LS DR10 g'},
+    'lsdr10_r': {'pix': 0.262, 'psfex': 'psfex_hsc.psfex', 'label': 'LS DR10 r'},
+    'lsdr10_i': {'pix': 0.262, 'psfex': 'psfex_hsc.psfex', 'label': 'LS DR10 i'},
+    'lsdr10_z': {'pix': 0.262, 'psfex': 'psfex_hsc.psfex', 'label': 'LS DR10 z'},
 }
 PIX        = 0.10      # arcsec/pixel — overwritten per-instrument in main()
 _PSFEX_CFG = 'psfex_euclid_vis.psfex'  # overwritten per-instrument in main()
@@ -233,7 +239,7 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
                           xx=None, yy=None, accepted_xy=None,
                           upper_bright=None, bright_pivot=None,
                           psf_fwhm_px=0.0, sat_onset_mag=None, snr_min=100.0,
-                          gaia_mask=None):
+                          gaia_mask=None, faint_purity_mag=None):
     """Render mag-vs-half-light-radius with the SAME PSF-star definition
     that 54_ uses, so the red dots match the actual ~hundreds of PSF
     candidates (not the ~30k point-source-like detections in the field)."""
@@ -289,6 +295,10 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
     if cs is not None: psf_star &= (cs > 0.8)
     if snr is not None: psf_star &= (snr > snr_min)
     if elon is not None: psf_star &= (elon < 1.5)
+    # shallow ground surveys (LS DR10): builder measures a purity faint limit
+    # where compact galaxies take over the locus band — honour it here.
+    if faint_purity_mag is not None:
+        psf_star &= np.isfinite(mag) & (mag < faint_purity_mag)
 
     psf_accepted = psf_star & is_acc_src          # accepted (solid) vs rejected
     psf_rejected = psf_star & (~psf_accepted)
@@ -355,6 +365,9 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
     if sat_onset_mag is not None:
         ax.axvline(sat_onset_mag, color='purple', ls=':', lw=1.8, alpha=0.85,
                    label=f'Saturation onset = {sat_onset_mag:.2f} mag (bright limit)')
+    if faint_purity_mag is not None:
+        ax.axvline(faint_purity_mag, color='darkorange', ls=':', lw=1.8, alpha=0.9,
+                   label=f'Purity limit = {faint_purity_mag:.1f} mag (measured faint limit)')
     ax.set_xlabel(f'MAG_AUTO ({band_upper}, AB)', fontsize=15, family='serif')
     ax.set_ylabel('Half-light radius FLUX_RADIUS [arcsec]', fontsize=15, family='serif')
     # y-range (ground): floor at locus−5·MAD (tilt-aware), ceiling at the seeing
@@ -969,7 +982,8 @@ def main():
                           xx=cx, yy=cy, accepted_xy=accepted_xy,
                           upper_bright=upper_bright, bright_pivot=bright_pivot,
                           psf_fwhm_px=psf_fwhm_est, sat_onset_mag=sat_onset,
-                          snr_min=snr_min_meta, gaia_mask=gaia_mask)
+                          snr_min=snr_min_meta, gaia_mask=gaia_mask,
+                          faint_purity_mag=_m.get('faint_purity_mag'))
     print(f'     mag_vs_halflight.png')
 
     # mag-vs-chi2 should plot ALL PSFEx-accepted stars (not just in-mosaic);

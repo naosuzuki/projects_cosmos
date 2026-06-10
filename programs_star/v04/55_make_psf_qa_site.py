@@ -54,6 +54,10 @@ BANDS = [
     ('HSC-i',  'HSC i (s23b deepCoadd)', 'hsc_i'),
     ('HSC-z',  'HSC z (s23b deepCoadd)', 'hsc_z'),
     ('HSC-y',  'HSC y (s23b deepCoadd)', 'hsc_y'),
+    ('LS-g',   'LS DR10 g (DECam)',      'lsdr10_g'),
+    ('LS-r',   'LS DR10 r (DECam)',      'lsdr10_r'),
+    ('LS-i',   'LS DR10 i (DECam)',      'lsdr10_i'),
+    ('LS-z',   'LS DR10 z (DECam)',      'lsdr10_z'),
 ]
 
 # canonical plot filenames (after symlinking into the site)
