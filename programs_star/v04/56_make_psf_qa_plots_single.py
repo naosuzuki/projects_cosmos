@@ -620,32 +620,117 @@ def plot_psf_mosaics(out_samp_png, out_resi_png, samp, resi, ocd,
            out_resi_png)
 
 
-def plot_hist_n(out_png, n_arr, mask_flags_lt2, band_upper):
-    if int(np.asarray(mask_flags_lt2).sum()) == 0:
-        print(f'  [skip] {out_png.name}: no FLAGS<2 candidates'); return
-    means = {r: n_arr[r][mask_flags_lt2].mean() for r in [1,2,3,4,5]}
-    n1c, n3c, n5c = n_arr[1][mask_flags_lt2], n_arr[3][mask_flags_lt2], n_arr[5][mask_flags_lt2]
+def plot_neighbour_scatter(out_png, xx, yy, mag, psf_mask, tree, band_upper,
+                           max_arcsec=5.0, iso_radius_arcsec=None,
+                           seeing_fwhm_arcsec=None, nbr_fwhm=None):
+    """Ground-based neighbour-contamination map.
+
+    For every SELECTED PSF model star, every detected source within
+    max_arcsec becomes one point:
+        x = separation from the PSF star centre (arcsec, 0–max_arcsec)
+        y = Δmag = (neighbour MAG_AUTO − PSF-star MAG_AUTO)
+                   >0 → neighbour is fainter (harmless);  <0 → brighter
+        colour = the PSF star's own magnitude, rainbow gradient
+                 red (bright) → blue (faint)
+    This replaces the neighbour-count histogram for ground data: it shows at a
+    glance whether the surviving neighbours are faint/harmless and confirms the
+    isolation radius is swept clear of any detected source."""
+    idx = np.where(np.asarray(psf_mask))[0]
+    if idx.size == 0:
+        print(f'  [skip] {out_png.name}: no selected PSF stars'); return
+    R = max_arcsec / PIX
+    rr, dm, pm = [], [], []
+    for k in idx:
+        pmag = mag[k]
+        if not np.isfinite(pmag):
+            continue
+        for j in tree.query_ball_point([xx[k], yy[k]], R):
+            if j == k:
+                continue
+            mj = mag[j]
+            if not np.isfinite(mj):
+                continue
+            sep = float(np.hypot(xx[j] - xx[k], yy[j] - yy[k])) * PIX
+            rr.append(sep); dm.append(mj - pmag); pm.append(pmag)
+    if not rr:
+        print(f'  [skip] {out_png.name}: no neighbours within {max_arcsec}"'); return
+    rr = np.asarray(rr); dm = np.asarray(dm); pm = np.asarray(pm)
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+    # rainbow_r: vmin(bright)→red, vmax(faint)→violet/blue.
+    sc = ax.scatter(rr, dm, c=pm, cmap='rainbow_r', s=26, alpha=0.85,
+                    edgecolor='k', linewidths=0.25, zorder=3,
+                    vmin=np.nanmin(pm), vmax=np.nanmax(pm), rasterized=True)
+    cb = fig.colorbar(sc, ax=ax, pad=0.015)
+    cb.set_label('PSF star magnitude  (red = bright → blue = faint)',
+                 fontsize=12, family='serif')
+    ax.axhline(0.0, color='0.35', ls=':', lw=1.6,
+               label='Δmag = 0 (neighbour as bright as PSF star)')
+    if seeing_fwhm_arcsec:
+        ax.axvline(seeing_fwhm_arcsec, color='green', ls=':', lw=1.8, alpha=0.9,
+                   label=f'seeing FWHM = {seeing_fwhm_arcsec:.2f}″')
+    if iso_radius_arcsec:
+        # derive the seeing for the label if it was not passed explicitly
+        fw = seeing_fwhm_arcsec
+        if fw is None and nbr_fwhm:
+            fw = iso_radius_arcsec / nbr_fwhm
+        nf = nbr_fwhm if nbr_fwhm else (iso_radius_arcsec / fw if fw else 0)
+        lbl = (f'isolation cut = {iso_radius_arcsec:.2f}″ = {nf:.1f} × FWHM ({fw:.2f}″)'
+               if fw else f'isolation cut = {iso_radius_arcsec:.2f}″')
+        ax.axvline(iso_radius_arcsec, color='red', ls='--', lw=1.8, alpha=0.85,
+                   label=lbl)
+    ax.set_xlim(0, max_arcsec)
+    ax.set_xlabel('Separation from PSF star centre (arcsec)',
+                  fontsize=14, family='serif')
+    ax.set_ylabel('Δmag  (neighbour − PSF star)   ·   fainter ↑',
+                  fontsize=14, family='serif')
+    ax.set_title(f'Neighbour Contamination Map — {band_upper}   '
+                 f'({idx.size} PSF stars, {rr.size} neighbours < {max_arcsec:.0f}″)',
+                 fontsize=12.5, family='serif')
+    ax.legend(loc='upper left', fontsize=10, framealpha=0.92)
+    ax.grid(alpha=0.25)
+    ax.tick_params(which='both', direction='in', top=True, right=True,
+                   labelsize=12, length=6)
+    ax.tick_params(which='minor', length=3); ax.minorticks_on()
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=120, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_hist_n(out_png, n_arr, mask_psf, band_upper, iso_radius_arcsec=None):
+    """Neighbour-count distributions for the ACTUAL selected PSF model stars.
+
+    Uses the real PSFEx-accepted star sample (not a stale snr>100 candidate
+    re-derivation), so on HSC's compressed SNR it still renders.  Because the
+    isolation cut rejects any star with a neighbour inside iso_radius_arcsec,
+    the n_r histograms for radii < iso_radius should pile up at 0 — that is the
+    visual proof the cut worked."""
+    mask_psf = np.asarray(mask_psf)
+    if int(mask_psf.sum()) == 0:
+        print(f'  [skip] {out_png.name}: no selected PSF stars'); return
+    N = int(mask_psf.sum())
+    means = {r: n_arr[r][mask_psf].mean() for r in [1,2,3,4,5]}
+    n1c, n3c, n5c = n_arr[1][mask_psf], n_arr[3][mask_psf], n_arr[5][mask_psf]
     fig, ax = plt.subplots(figsize=(11, 7))
     bins = np.arange(0, max(int(n5c.max()) if n5c.size else 0, 30)+1) - 0.5
     ax.hist(n1c, bins=bins, color='red',   alpha=0.55,
-            label=f'$n_1$ (1″)  N={mask_flags_lt2.sum()}',
-            edgecolor='darkred', lw=0.8)
+            label=f'$n_1$ (1″)  N={N}', edgecolor='darkred', lw=0.8)
     ax.hist(n3c, bins=bins, color='green', alpha=0.45,
-            label=f'$n_3$ (3″)  N={mask_flags_lt2.sum()}',
-            edgecolor='darkgreen', lw=0.8)
+            label=f'$n_3$ (3″)  N={N}', edgecolor='darkgreen', lw=0.8)
     ax.hist(n5c, bins=bins, color='blue',  alpha=0.35,
-            label=f'$n_5$ (5″)  N={mask_flags_lt2.sum()}',
-            edgecolor='darkblue', lw=0.8)
+            label=f'$n_5$ (5″)  N={N}', edgecolor='darkblue', lw=0.8)
     ax.axvline(means[1], color='darkred',    ls=':', lw=2.0, label=f'mean $n_1$ = {means[1]:.2f}')
     ax.axvline(means[2], color='orange',     ls=':', lw=2.0, label=f'mean $n_2$ = {means[2]:.2f}')
     ax.axvline(means[3], color='darkgreen',  ls=':', lw=2.0, label=f'mean $n_3$ = {means[3]:.2f}')
     ax.axvline(means[4], color='teal',       ls=':', lw=2.0, label=f'mean $n_4$ = {means[4]:.2f}')
     ax.axvline(means[5], color='darkblue',   ls=':', lw=2.0, label=f'mean $n_5$ = {means[5]:.2f}')
-    ax.axvline(1.5, color='red', ls='--', lw=1.5, alpha=0.7, label='cut: $n_1\\geq2$')
+    iso_txt = (f'isolation cut: no neighbour < {iso_radius_arcsec:.2f}″'
+               if iso_radius_arcsec else 'isolation-cut sample')
+    ax.axvline(0.0, color='black', ls='--', lw=1.5, alpha=0.6, label=iso_txt)
     ax.set_xlabel('Neighbour count', fontsize=15, family='serif')
-    ax.set_ylabel('Number of PSF candidates (FLAGS<2)', fontsize=15, family='serif')
-    ax.set_title(f'Neighbour-Count Distributions for FLAGS<2 PSF Candidates ({band_upper}).  '
-                 f'N={mask_flags_lt2.sum()}.', fontsize=13, family='serif')
+    ax.set_ylabel('Number of selected PSF model stars', fontsize=15, family='serif')
+    ax.set_title(f'Neighbour-Count Distributions for Selected PSF Model Stars ({band_upper}).  '
+                 f'N={N}.', fontsize=13, family='serif')
     ax.set_xlim(-0.7, 30)        # uniform x-max=30 across HST/JWST/Euclid
     ax.legend(loc='upper right', fontsize=10, framealpha=0.92)
     ax.grid(alpha=0.25)
@@ -841,17 +926,26 @@ def main():
     print(f'     psf_samples.png / psf_residuals.png  '
           f'(total accepted={n_accepted_total})')
 
-    # FLAGS<2 PSF candidates — same band as 54_ ([cut, upper] from the meta)
-    saturated = ncoremask > 0
-    edge = (flg & 8) > 0
-    candidate = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > 0)
-                 & (fr > cut) & (fr < upper)
-                 & (~saturated) & (~edge))
-    cand_flg_lt2 = candidate & (flg < 2)
-    plot_hist_n(psf_dir / 'hist_n_means.png',
-                {r: n_arr[r] for r in [1,2,3,4,5]},
-                cand_flg_lt2, band_upper)
-    print(f'     hist_n_means.png')
+    # neighbour diagnostic of the ACTUAL selected PSF model stars (same
+    # psf_star_mask used by the saturation plot).  GROUND data (HSC, large
+    # pixels, crowded COSMOS) gets the Δmag-vs-separation contamination map;
+    # SPACE data keeps the neighbour-count histogram.
+    if PIX >= 0.15:
+        _fwhm_px = _m.get('fwhm_px')
+        _seeing  = (_fwhm_px * PIX) if _fwhm_px else None
+        plot_neighbour_scatter(psf_dir / 'neighbour_scatter.png',
+                               xx, yy, mag, psf_star_mask, tree, band_upper,
+                               max_arcsec=5.0,
+                               iso_radius_arcsec=_m.get('nbr_radius_arcsec'),
+                               seeing_fwhm_arcsec=_seeing,
+                               nbr_fwhm=_m.get('nbr_fwhm'))
+        print(f'     neighbour_scatter.png')
+    else:
+        plot_hist_n(psf_dir / 'hist_n_means.png',
+                    {r: n_arr[r] for r in [1,2,3,4,5]},
+                    psf_star_mask, band_upper,
+                    iso_radius_arcsec=_m.get('nbr_radius_arcsec'))
+        print(f'     hist_n_means.png')
     print(f'=== {band_upper} A4 QA plots done ===')
 
 

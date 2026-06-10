@@ -59,7 +59,7 @@ PANELS = [
     ('saturation_peak',   'Peak Count vs Mag (saturation)'),
     ('psf_samples',       'PSF Samples Mosaic'),
     ('psf_residuals',     'PSF Residuals Mosaic'),
-    ('hist_n_means',      'Neighbour Count Histograms'),
+    ('hist_n_means',      'Neighbour Diagnostic (hist / Δmag–sep)'),
 ]
 
 # Mapping from canonical panel name → source-file glob to copy/link.
@@ -118,6 +118,11 @@ def link_plots_for_tile(band: str, tile: str, instrument: str) -> dict[str, Path
         cand = WORK / instrument / tile / 'psf' / f'{panel}.png'
         if cand.exists():
             target = cand
+        # ground data (HSC) replaces the neighbour-count histogram with the
+        # Δmag-vs-separation contamination scatter in the SAME slot.
+        elif panel == 'hist_n_means' and \
+                (WORK / instrument / tile / 'psf' / 'neighbour_scatter.png').exists():
+            target = WORK / instrument / tile / 'psf' / 'neighbour_scatter.png'
         # fallback to F115W A4 pilot if production is not yet there
         elif band == 'F115W' and tile == 'A4':
             src = PILOT / PILOT_SRC[panel]
