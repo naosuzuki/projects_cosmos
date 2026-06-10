@@ -43,7 +43,11 @@ from scipy.spatial import cKDTree
 PROJECT = Path('/Users/suzuki/github/projects_cosmos')
 CONFIGS = PROJECT / 'configs'
 WORK    = Path('/Volumes/exdisk1/data/photometry_v04')
-GAIA_CSV = Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS/gaia_dr3_cosmos.csv')
+# prefer the wide-bbox superset (covers the LS DR10 rim bricks); fall back to
+# the original VIS-trimmed pull when the wide file is absent.
+_GAIA_WIDE = Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS/gaia_dr3_cosmos_wide.csv')
+GAIA_CSV = (_GAIA_WIDE if _GAIA_WIDE.exists()
+            else Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS/gaia_dr3_cosmos.csv'))
 
 
 def gaia_match(ra, dec, radius_arcsec=0.6):
@@ -858,6 +862,15 @@ def main():
     if not psf_dir.exists():
         sys.exit(f'No 54_ output dir: {psf_dir}')
     print(f'  band={band}  tile={args.tile}  psf_dir={psf_dir}')
+    # sparse/edge tiles: builder wrote a no-coverage stub — nothing to plot.
+    _mf = psf_dir / f'psf_{band}.meta.json'
+    if _mf.exists():
+        import json as _json0
+        _m0 = _json0.loads(_mf.read_text())
+        if _m0.get('status') == 'no_coverage' or _m0.get('n_model_stars', 1) == 0:
+            print(f'  [skip] {args.instrument}/{args.tile}: no_coverage stub '
+                  f'(n_model_stars=0) — no QA plots')
+            return
 
     # 1. ensure OUTCAT
     outcat = ensure_outcat(psf_dir, band, args.reuse_outcat)

@@ -41,7 +41,11 @@ ALLMASK_BIT = {'g': 5, 'r': 6, 'i': 15, 'z': 7}
 B_NPRIMARY  = 0
 VIG_HALF = 50                         # pass1_hst_acs.param VIGNET(101,101)
 
-GAIA_CSV = Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS/gaia_dr3_cosmos.csv')
+# wide-bbox superset (no VIS-polygon trim) — covers the full LS brick grid;
+# the original VIS-trimmed CSV starves the rim bricks of Gaia anchors.
+_GAIA_WIDE = Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS/gaia_dr3_cosmos_wide.csv')
+GAIA_CSV = (_GAIA_WIDE if _GAIA_WIDE.exists()
+            else Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS/gaia_dr3_cosmos.csv'))
 
 
 def gaia_star_mask(xx, yy, hdr, radius_arcsec=0.6):
@@ -116,7 +120,12 @@ def main():
     fits.PrimaryHDU(sci, header=imhdr).writeto(img_clean, overwrite=True)
     sex_img = str(img_clean)
     zp = ZP_AB
-    core_reject = (1 << SATUR_BIT[band]) | (1 << ALLMASK_BIT[band])
+    # SATUR only — NOT ALLMASK: ALLMASK fires where ALL exposures are masked,
+    # so on low-nexp edge bricks (1-2 i exposures) single-exposure artifacts
+    # (CR/interp/badpix) blanket the brick, flagging most stars "saturated"
+    # and driving the measured onset to absurd depths (~25.8 on 1488p015 i).
+    # Artifact-corrupted vignettes are instead handled by PSFEx chi2 cleaning.
+    core_reject = (1 << SATUR_BIT[band])
     gap_reject  = (1 << B_NPRIMARY)
 
     print(f'Instrument : {inst}  (DESI Legacy DR10 south / DECam)')
@@ -166,6 +175,15 @@ def main():
     is_pt = (cs > 0.8) & (snr > a.snr_min)
     sat_pt = saturated & is_pt & np.isfinite(mag)
     onset_mag = float(np.percentile(mag[sat_pt], 90)) if sat_pt.sum() >= 5 else None
+    # sanity clamp: a real onset is BRIGHTER than the bulk of the point
+    # sources; an onset fainter than their median means the mask test is
+    # blanket-flagging (low-nexp artifact pathology) — treat as no onset.
+    if onset_mag is not None:
+        med_pt = float(np.nanmedian(mag[is_pt & np.isfinite(mag)]))
+        if not np.isfinite(onset_mag) or onset_mag > med_pt:
+            print(f'  [warn] measured onset {onset_mag:.2f} > point-source '
+                  f'median {med_pt:.2f} — implausible, ignoring onset')
+            onset_mag = None
     # bright limit = the MEASURED saturation magnitude (no ad-hoc cut)
     if onset_mag is not None and np.isfinite(onset_mag):
         saturated = saturated | (np.isfinite(mag) & (mag < onset_mag))
@@ -175,10 +193,61 @@ def main():
     # ── Gaia-DR3-anchored stellar locus (immune to compact-galaxy bias) ──
     gaia_star = gaia_star_mask(xx, yy, imhdr, radius_arcsec=0.6)
     locus_base = gaia_star & (flg < 2) & (fr > 0) & (snr > a.snr_min) & (~saturated)
-    anchored = int(locus_base.sum()) >= 15
+
+    # ── bright-side locus departure = saturation fallback ───────────────────
+    # On many bricks <5 point sources carry SATUR maskbits → onset=None → no
+    # bright veto → saturated-but-unflagged stars with BLOATED FLUX_RADIUS
+    # contaminate the Gaia locus sample (inflating MAD 3-6x).  Measure the
+    # bright limit from the locus geometry itself: the faint half of the Gaia
+    # range (≳2 mag below Gaia's limit, safely unsaturated) defines the ridge;
+    # scanning bright-ward, the first 0.5-mag bin whose median FR departs
+    # >2·MAD above the ridge marks saturation bloat.  Mirror image of the
+    # faint purity limit — measured, not ad-hoc.
+    sat_onset_method = 'maskbits' if onset_mag is not None else None
+    if onset_mag is None and int(locus_base.sum()) >= 20:
+        gm, gf = mag[locus_base], fr[locus_base]
+        gok = np.isfinite(gm) & np.isfinite(gf)
+        gm, gf = gm[gok], gf[gok]
+        mhalf = float(np.median(gm))
+        ridge0 = float(np.median(gf[gm > mhalf]))           # faint half = clean
+        mad0 = 1.4826 * float(np.median(np.abs(gf[gm > mhalf] - ridge0)))
+        dep = None
+        for lo in np.arange(np.floor(gm.min() * 2) / 2, mhalf, 0.5):
+            b = (gm >= lo) & (gm < lo + 0.5)
+            if b.sum() < 4:
+                continue
+            if float(np.median(gf[b])) - ridge0 > 2.0 * max(mad0, 0.03):
+                dep = float(lo + 0.5)       # bloated bin → limit at its faint edge
+            else:
+                break                        # first clean bin going faint-ward
+        if dep is not None:
+            onset_mag = dep
+            sat_onset_method = 'locus_departure'
+            saturated = saturated | (np.isfinite(mag) & (mag < onset_mag))
+            locus_base = locus_base & (~saturated)
+            print(f'  bright veto  : locus-departure saturation onset = '
+                  f'{onset_mag:.2f} mag (maskbits gave none)')
+
+    # partial-coverage rim bricks may hold only ~10 Gaia stars in one corner —
+    # a TIGHT locus from few pure stars beats a broad one from hundreds of
+    # CLASS_STAR objects (contaminated at LS depth/seeing), so anchor on as
+    # few as 8.  MAD gets a small-sample noise floor below.
+    anchored = int(locus_base.sum()) >= 8
     if not anchored:
         locus_base = ((cs > 0.8) & (snr > a.snr_min) & (flg < 2) & (elon < 1.5)
                       & (fr > 0) & (~saturated))
+    # graceful no-coverage exit: too few usable locus stars (sparse/edge brick)
+    if int(locus_base.sum()) < 10:
+        (out / f'psf_{suffix}.meta.json').write_text(json.dumps({
+            'created_utc_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'instrument': inst, 'tile': brick, 'filter': band,
+            'channel': 'lsdr10', 'status': 'no_coverage',
+            'n_locus_stars': int(locus_base.sum()), 'n_model_stars': 0,
+        }, indent=2))
+        print(f'  [no_coverage] only {int(locus_base.sum())} locus stars — '
+              f'sparse/edge brick; wrote stub meta and exiting cleanly')
+        return
+
     med = float(np.median(fr[locus_base]))
     mad = 1.4826 * float(np.median(np.abs(fr[locus_base] - med)))
     for _ in range(20):
@@ -188,6 +257,7 @@ def main():
         nmad = 1.4826 * float(np.median(np.abs(fr[locus_base][sel] - nmed)))
         if abs(nmed-med) < 1e-4 and abs(nmad-mad) < 1e-4: med, mad = nmed, nmad; break
         med, mad = nmed, nmad
+    mad = max(mad, 0.04)        # small-sample noise floor (0.04 px = 10 mas)
     onloc = locus_base & (np.abs(fr - med) < 3.0 * mad)
     psf_fwhm_est = (float(np.median(fwhm[onloc])) if onloc.sum() >= 3
                     else float(np.median(fwhm[locus_base])))
@@ -384,6 +454,7 @@ def main():
         'locus_anchor': ('gaia_dr3' if anchored else 'class_star'),
         'n_gaia_matched': int(gaia_star.sum()),
         'sat_onset_mag': onset_mag,
+        'sat_onset_method': sat_onset_method,
         'snr_min': float(a.snr_min),
         'n_psf_stars': int(star.sum()),
         'n_psfex_accepted': n_acc,

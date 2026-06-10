@@ -49,7 +49,8 @@ HSC_BANDS  = ['g', 'r', 'i', 'z', 'y']                         # tract-9813 griz
 # SExtractor re-reads), so the big missions stay modest; small Euclid frames
 # tolerate more.  HSC deepCoadd patches are 4200² (modest) but each build
 # writes a ~70 MB cleaned-image copy, so keep it middling.
-DEFAULT_JOBS = {'jwst': 3, 'hst': 3, 'euclid': 6, 'euclid_nisp': 6, 'hsc': 4}
+DEFAULT_JOBS = {'jwst': 3, 'hst': 3, 'euclid': 6, 'euclid_nisp': 6, 'hsc': 4,
+                'lsdr10': 4}
 
 # big per-tile intermediates to delete once the model + plots + meta exist,
 # so a 160-tile run doesn't pile up ~1 TB on the scratch disk.  Kept: the .psf
@@ -72,6 +73,19 @@ def nisp_tiles():
     # tiles are well-covered), but the builder handles sparse tiles gracefully.
     return sorted({p.name.split('TILE')[1].split('-')[0]
                    for p in EUC.glob('EUC_MER_BGSUB-MOSAIC-NIR-Y_TILE*.fits')})
+
+
+LS_COADD = Path('/Volumes/exdisk1/data/DESI_Legacy/COSMOS/dr10/south/coadd')
+
+
+def lsdr10_avail():
+    """Set of (brick, band) LS DR10 image coadds present on disk."""
+    avail = set()
+    for f in LS_COADD.glob('*/*/legacysurvey-*-image-*.fits.fz'):
+        m = re.search(r'legacysurvey-(\w+)-image-([griz])\.fits\.fz', f.name)
+        if m:
+            avail.add((m.group(1), m.group(2)))
+    return avail
 
 
 def hsc_avail():
@@ -147,6 +161,18 @@ def build_worklist(missions):
                            '--patch', patch, '--filter', b],
                 plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
                           '--instrument', inst, '--tile', patch]))
+    if 'lsdr10' in missions:
+        # LS DR10 south bricks (Euclid-VIS scope, 92) × griz; only what's on disk.
+        for brick, b in sorted(lsdr10_avail()):
+            inst = f'lsdr10_{b}'
+            meta = WORK / inst / brick / 'psf' / f'psf_{brick}.meta.json'
+            items.append(dict(
+                mission='lsdr10', instrument=inst, tile=brick, band=b, suffix=brick,
+                meta=meta,
+                build_cmd=[PY, str(HERE / '54_step3a_build_psf_model_lsdr10.py'),
+                           '--brick', brick, '--filter', b],
+                plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
+                          '--instrument', inst, '--tile', brick]))
     return items
 
 
@@ -231,7 +257,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--missions', default='jwst,hst,euclid',
-                   help='comma list of jwst,hst,euclid,euclid_nisp,hsc')
+                   help='comma list of jwst,hst,euclid,euclid_nisp,hsc,lsdr10')
     p.add_argument('--jobs', type=int, default=None,
                    help='override per-mission concurrency for all missions')
     p.add_argument('--force', action='store_true', help='reprocess even if done')
