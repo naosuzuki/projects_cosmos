@@ -49,7 +49,10 @@ BANDS = [
     ('NISP-Y', 'Euclid NISP Y',          'euclid_nisp_y'),
     ('NISP-J', 'Euclid NISP J',          'euclid_nisp_j'),
     ('NISP-H', 'Euclid NISP H',          'euclid_nisp_h'),
+    ('HSC-g',  'HSC g (s23b deepCoadd)', 'hsc_g'),
+    ('HSC-r',  'HSC r (s23b deepCoadd)', 'hsc_r'),
     ('HSC-i',  'HSC i (s23b deepCoadd)', 'hsc_i'),
+    ('HSC-z',  'HSC z (s23b deepCoadd)', 'hsc_z'),
 ]
 
 # canonical plot filenames (after symlinking into the site)
