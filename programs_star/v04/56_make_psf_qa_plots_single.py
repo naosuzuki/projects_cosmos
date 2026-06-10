@@ -680,6 +680,7 @@ def plot_neighbour_scatter(out_png, xx, yy, mag, psf_mask, tree, band_upper,
         ax.axvline(iso_radius_arcsec, color='red', ls='--', lw=1.8, alpha=0.85,
                    label=lbl)
     ax.set_xlim(0, max_arcsec)
+    ax.set_ylim(-3.5, 8.5)          # fixed Δmag range, uniform across all bands
     ax.set_xlabel('Separation from PSF star centre (arcsec)',
                   fontsize=14, family='serif')
     ax.set_ylabel('Δmag  (neighbour − PSF star)   ·   fainter ↑',

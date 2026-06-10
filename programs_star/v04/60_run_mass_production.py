@@ -24,7 +24,7 @@ Usage:
   ./60_run_mass_production.py --no-site             # skip site rebuild at end
 """
 from __future__ import annotations
-import argparse, csv, json, subprocess, sys, threading, time
+import argparse, csv, json, re, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -32,6 +32,7 @@ HERE = Path(__file__).resolve().parent
 PY   = '/opt/miniconda3/bin/python'
 WORK = Path('/Volumes/exdisk1/data/photometry_v04')
 EUC  = Path('/Volumes/exdisk1/data/Euclid/COSMOS_DR1')
+HSC  = Path('/Volumes/exdisk1/data/HSC/COSMOS/s23b')
 TIMING_DIR = Path('/Users/suzuki/github/projects_cosmos/programs_star/csv_timing')
 TIMING_DIR.mkdir(parents=True, exist_ok=True)
 TIMING_CSV = TIMING_DIR / 'mass_timing.csv'
@@ -41,17 +42,21 @@ TIMING_COLS = ['utc', 'mission', 'instrument', 'tile', 'band', 'status',
 
 AB_TILES   = [f'{r}{n}' for r in 'AB' for n in range(1, 11)]   # A1..A10,B1..B10
 JWST_BANDS = ['f115w', 'f150w', 'f277w', 'f444w']
+HSC_BANDS  = ['g', 'r', 'i', 'z', 'y']                         # tract-9813 grizy
 
 # per-mission concurrency tuned to the single HDD (override with --jobs).
 # The copy-based builders are I/O-heavy (read i2d SCI+WHT, write sci_/wht_,
 # SExtractor re-reads), so the big missions stay modest; small Euclid frames
-# tolerate more.
-DEFAULT_JOBS = {'jwst': 3, 'hst': 3, 'euclid': 6, 'euclid_nisp': 6}
+# tolerate more.  HSC deepCoadd patches are 4200² (modest) but each build
+# writes a ~70 MB cleaned-image copy, so keep it middling.
+DEFAULT_JOBS = {'jwst': 3, 'hst': 3, 'euclid': 6, 'euclid_nisp': 6, 'hsc': 4}
 
 # big per-tile intermediates to delete once the model + plots + meta exist,
 # so a 160-tile run doesn't pile up ~1 TB on the scratch disk.  Kept: the .psf
-# model, stars catalog, outcat, meta JSON, and the 6 QA PNGs.
-CLEAN_GLOBS = ('sci_*.fits', 'wht_*.fits', 'pass1_*.fits',
+# model, stars catalog, outcat, meta JSON, and the 6 QA PNGs.  (image_*.fits is
+# the HSC single-HDU cleaned-image copy SExtractor reads; the calexp is read
+# from its original path at plot time, so the copy is disposable.)
+CLEAN_GLOBS = ('sci_*.fits', 'wht_*.fits', 'pass1_*.fits', 'image_*.fits',
                'samp*.fits', 'resi*.fits', 'proto*.fits', 'snap*.fits')
 
 _lock = threading.Lock()
@@ -67,6 +72,17 @@ def nisp_tiles():
     # tiles are well-covered), but the builder handles sparse tiles gracefully.
     return sorted({p.name.split('TILE')[1].split('-')[0]
                    for p in EUC.glob('EUC_MER_BGSUB-MOSAIC-NIR-Y_TILE*.fits')})
+
+
+def hsc_avail():
+    """Set of (patch, band) tract-9813 deepCoadd_calexp present on disk, so we
+    only fan out over real data (resumable; no work items for missing tiles)."""
+    avail = set()
+    for f in HSC.glob('s23b_deep2/9813/*/*/deepCoadd_calexp_9813_*_*.fits'):
+        m = re.search(r'deepCoadd_calexp_9813_(\d+)_([grizy])_', f.name)
+        if m:
+            avail.add((m.group(1), m.group(2)))
+    return avail
 
 
 def build_worklist(missions):
@@ -119,6 +135,18 @@ def build_worklist(missions):
                                '--band', b, '--tile', t],
                     plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
                               '--instrument', inst, '--tile', t]))
+    if 'hsc' in missions:
+        # tract-9813 deepCoadd patches 0-80 × grizy; build only what's on disk.
+        for patch, b in sorted(hsc_avail(), key=lambda x: (int(x[0]), x[1])):
+            inst = f'hsc_{b}'
+            meta = WORK / inst / patch / 'psf' / f'psf_{patch}.meta.json'
+            items.append(dict(
+                mission='hsc', instrument=inst, tile=patch, band=b, suffix=patch,
+                meta=meta,
+                build_cmd=[PY, str(HERE / '54_step3a_build_psf_model_hsc.py'),
+                           '--patch', patch, '--filter', b],
+                plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
+                          '--instrument', inst, '--tile', patch]))
     return items
 
 
@@ -203,7 +231,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--missions', default='jwst,hst,euclid',
-                   help='comma list of jwst,hst,euclid')
+                   help='comma list of jwst,hst,euclid,euclid_nisp,hsc')
     p.add_argument('--jobs', type=int, default=None,
                    help='override per-mission concurrency for all missions')
     p.add_argument('--force', action='store_true', help='reprocess even if done')

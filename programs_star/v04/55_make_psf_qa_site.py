@@ -53,6 +53,7 @@ BANDS = [
     ('HSC-r',  'HSC r (s23b deepCoadd)', 'hsc_r'),
     ('HSC-i',  'HSC i (s23b deepCoadd)', 'hsc_i'),
     ('HSC-z',  'HSC z (s23b deepCoadd)', 'hsc_z'),
+    ('HSC-y',  'HSC y (s23b deepCoadd)', 'hsc_y'),
 ]
 
 # canonical plot filenames (after symlinking into the site)
