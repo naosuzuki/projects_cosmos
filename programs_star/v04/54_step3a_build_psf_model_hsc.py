@@ -259,10 +259,44 @@ def main():
     psf_size = int(round(2.0 * a.psf_fwhm * fwhm_px)) | 1
     e_round = ell < 0.20
 
-    # FR band — tight at faint (rejects galaxies), relaxed at the bright end
+    # scalar bright-end relaxed upper (used by the two-pass anchor override)
     upper_bright = med + 6.0 * mad
-    upper_arr = np.where(np.isfinite(mag) & (mag < bright_pivot), upper_bright, upper)
-    keep_fr = (fr > cut) & (fr < upper_arr)
+
+    # ── TILTED (magnitude-dependent) stellar locus ──────────────────────────
+    # Ground PSF FLUX_RADIUS descends toward faint mags (faint stars lose their
+    # low-SNR wings).  Fit a STRAIGHT line FR = slope·mag + icpt to the locus
+    # stars across the full magnitude range — seeded by the constant median and
+    # asymmetric-clipped (galaxies sit ABOVE the ridge) — so the artifact cut
+    # and upper rail are PARALLEL tilted rails at locus(mag) ∓ 3·MAD.  Robust
+    # fallbacks: too-few stars / a wild slope revert to the flat constant median.
+    wpx   = max(0.40, 8.0 * mad)                    # px half-window around ridge
+    tsamp = ((cs > 0.8) & (snr > a.snr_min) & (flg < 2) & (~saturated)
+             & (fr > 0) & np.isfinite(mag) & (np.abs(fr - med) < wpx)) | locus_base
+    slope, icpt, mad_t, tilted = 0.0, med, mad, False
+    if int(tsamp.sum()) >= 20:
+        tm, tf = mag[tsamp], fr[tsamp]
+        kp, bb, ss = (np.isfinite(tm) & np.isfinite(tf)), (0.0, med), mad
+        for _ in range(8):
+            if kp.sum() < 8:
+                break
+            bb = np.polyfit(tm[kp], tf[kp], 1)
+            rr = tf - np.polyval(bb, tm)
+            ss = 1.4826 * float(np.median(np.abs(rr[kp] - np.median(rr[kp]))))
+            if ss <= 0:
+                break
+            kp = (rr > -3.5 * ss) & (rr < 3.0 * ss)     # tighter above (galaxies)
+        slope = float(np.clip(bb[0], -0.08, 0.02))      # sane ground slope px/mag
+        icpt, mad_t, tilted = float(bb[1]), max(float(ss), 0.030), True
+    locus_of = lambda mm: slope * np.asarray(mm, float) + icpt
+
+    # FR band: parallel tilted rails (bright end relaxed for the anchor override)
+    cut_arr   = locus_of(mag) - 3.0 * mad_t
+    upper_arr = np.where(np.isfinite(mag) & (mag < bright_pivot),
+                         locus_of(mag) + 6.0 * mad_t, locus_of(mag) + 3.0 * mad_t)
+    keep_fr   = (fr > cut_arr) & (fr < upper_arr)
+    print(f'  tilted locus : {"on" if tilted else "OFF(const)"}  '
+          f'FR={slope:+.4f}·mag{icpt:+.3f}px  ({slope*PIXSCALE*1000:+.1f} mas/mag)  '
+          f'MAD_t={mad_t:.4f}px')
     # NO ad-hoc magnitude cut: bright end = measured saturation mag (above),
     # faint end = S/N floor + the FLUX_RADIUS locus band (rejects the galaxy sea)
     star = ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
@@ -356,6 +390,11 @@ def main():
         'bright_pivot_mag': float(bright_pivot),
         'stellar_locus_arcsec': float(med * PIXSCALE),
         'locus_mad_arcsec': float(mad * PIXSCALE),
+        'locus_tilted': bool(tilted),
+        'locus_slope_px_per_mag': float(slope),
+        'locus_intercept_px': float(icpt),
+        'locus_mad_tilt_px': float(mad_t),
+        'locus_slope_mas_per_mag': float(slope * PIXSCALE * 1000.0),
         'locus_anchor': ('gaia_dr3' if anchored else 'class_star'),
         'n_gaia_matched': int(gaia_star.sum()),
         'sat_onset_mag': onset_mag,

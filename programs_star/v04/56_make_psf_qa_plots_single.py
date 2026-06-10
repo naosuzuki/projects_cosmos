@@ -43,6 +43,28 @@ from scipy.spatial import cKDTree
 PROJECT = Path('/Users/suzuki/github/projects_cosmos')
 CONFIGS = PROJECT / 'configs'
 WORK    = Path('/Volumes/exdisk1/data/photometry_v04')
+GAIA_CSV = Path('/Volumes/exdisk1/data/catalog/Gaia/COSMOS/gaia_dr3_cosmos.csv')
+
+
+def gaia_match(ra, dec, radius_arcsec=0.6):
+    """Boolean mask: detections within `radius` of a Gaia DR3 source.
+    All-False on any failure (missing CSV, etc.) so the plot still renders."""
+    try:
+        import pandas as pd
+        from astropy.coordinates import SkyCoord
+        import astropy.units as u
+        g = pd.read_csv(GAIA_CSV)
+        rc = next(c for c in g.columns if c.lower() in ('ra', 'ra_deg', 'ra_icrs'))
+        dc = next(c for c in g.columns if c.lower() in ('dec', 'dec_deg', 'dec_icrs'))
+        cd = SkyCoord(np.asarray(ra) * u.deg, np.asarray(dec) * u.deg)
+        cg = SkyCoord(g[rc].values * u.deg, g[dc].values * u.deg)
+        _, d2d, _ = cd.match_to_catalog_sky(cg)
+        return np.asarray(d2d.arcsec < radius_arcsec)
+    except Exception as e:
+        print(f'  [gaia_match] skipped: {e}')
+        return None
+
+
 # Single-HDU instruments (Euclid VIS, HST ACS/WFC F814W).  PIX and the
 # PSFEx config are selected per-instrument in main() and exposed as module
 # globals so the plot/outcat helpers can read them.
@@ -210,7 +232,8 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
                           cs=None, snr=None, elon=None, flg=None, n1=None,
                           xx=None, yy=None, accepted_xy=None,
                           upper_bright=None, bright_pivot=None,
-                          psf_fwhm_px=0.0, sat_onset_mag=None, snr_min=100.0):
+                          psf_fwhm_px=0.0, sat_onset_mag=None, snr_min=100.0,
+                          gaia_mask=None):
     """Render mag-vs-half-light-radius with the SAME PSF-star definition
     that 54_ uses, so the red dots match the actual ~hundreds of PSF
     candidates (not the ~30k point-source-like detections in the field)."""
@@ -219,36 +242,67 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
     edge = (flg & 8) > 0 if flg is not None else np.zeros_like(good, bool)
     contaminated = ((n1 >= 2) & (flg < 2)) if (n1 is not None and flg is not None) \
                    else np.zeros_like(good, bool)
-    art = good & (fr > 0) & ((fr < cut_px) | (fwhm <= 0)) & (~saturated)
-    # Apply the full 54_ selection so this plot's red dots match the
-    # actual PSF-candidate count (~317 for F115W A4), not 30k.
-    psf_star = good & (fr > cut_px) & (fr < locus_px + 2.5*std_px) & (fwhm > 0) \
+
+    # distance of every detection to the nearest PSFEx-accepted star — drives
+    # both the accepted/rejected split and the tilted-locus fit sample.
+    d_acc = np.full(mag.shape, np.inf)
+    if accepted_xy is not None and xx is not None and yy is not None and len(accepted_xy):
+        d_acc, _ = cKDTree(np.asarray(accepted_xy)).query(
+            np.column_stack([xx, yy]), k=1)
+    is_acc_src = d_acc < 1.0                       # detection = an accepted star
+
+    # ── ground-based: magnitude-dependent (TILTED) stellar locus ──
+    # The accepted stars trace a locus that TILTS with magnitude (faint stars
+    # lose their low-SNR wings → smaller FLUX_RADIUS).  Fit a straight line to
+    # them; the ARTIFACT CUT is that SAME line shifted by −3·MAD (parallel), so
+    # the blue "artifact" circles, the candidate split, AND the y-floor all
+    # follow the tilt.  Space missions (PIX<0.15) keep the flat constant cut.
+    tilt = None
+    if PIX >= 0.15:
+        _am, _af = mag[is_acc_src], fr[is_acc_src]
+        _ok = np.isfinite(_am) & np.isfinite(_af) & (_af > 0)
+        if _ok.sum() >= 10:
+            _am, _af = _am[_ok], _af[_ok]
+            _kp = np.ones(_am.size, bool)
+            for _ in range(5):
+                _b = np.polyfit(_am[_kp], _af[_kp], 1)
+                _r = _af - np.polyval(_b, _am)
+                _madt = 1.4826 * np.median(np.abs(_r[_kp] - np.median(_r[_kp])))
+                if _madt <= 0:
+                    break
+                _kp = np.abs(_r) < 4.0 * _madt
+            tilt = (np.poly1d(_b), float(_madt),
+                    float(np.nanpercentile(_am, 2)), float(np.nanpercentile(_am, 98)))
+
+    # per-source lower (artifact) cut: tilted where available, else constant.
+    if tilt is not None:
+        _tl0, _madt0, _mlo0, _mhi0 = tilt
+        cut_arr = _tl0(mag) - 3.0 * _madt0
+    else:
+        cut_arr = np.full_like(fr, cut_px)
+
+    art = good & (fr > 0) & ((fr < cut_arr) | (fwhm <= 0)) & (~saturated)
+    # Full 54_ selection so this plot's red dots match the actual PSF-candidate
+    # count (lower bound now the tilted artifact cut).
+    psf_star = good & (fr > cut_arr) & (fr < locus_px + 2.5*std_px) & (fwhm > 0) \
                & (~saturated) & (~edge) & (~contaminated)
     if cs is not None: psf_star &= (cs > 0.8)
     if snr is not None: psf_star &= (snr > snr_min)
     if elon is not None: psf_star &= (elon < 1.5)
 
-    # Split into PSFEx-accepted (solid) vs PSFEx-rejected (open) using the
-    # accepted star coordinates passed in from main().
-    psf_accepted = np.zeros_like(psf_star)
-    if accepted_xy is not None and xx is not None and yy is not None and len(accepted_xy):
-        tree_acc = cKDTree(np.asarray(accepted_xy))
-        d, _ = tree_acc.query(np.column_stack([xx, yy]), k=1)
-        psf_accepted = psf_star & (d < 1.0)   # within 1 px = same source
+    psf_accepted = psf_star & is_acc_src          # accepted (solid) vs rejected
     psf_rejected = psf_star & (~psf_accepted)
 
     # ── Bright-end shape override ──
     # PSFEx χ²-flags the highest-S/N stars because they out-resolve the
-    # empirical PSF model (a few-% floor, irreducible for the resampled NISP
-    # MER), NOT because they are bad.  Reinstate a bright (mag < bright_pivot)
-    # PSFEx-rejected candidate as an accepted PSF anchor when its shape is
-    # INDEPENDENTLY stellar: FLUX_RADIUS on the (bright) locus, FWHM consistent
-    # with the PSF, and low ellipticity.  Faint rejections are left untouched.
+    # empirical PSF model (a few-% floor), NOT because they are bad.  Reinstate
+    # a bright (mag < bright_pivot) PSFEx-rejected candidate as an accepted PSF
+    # anchor when its shape is INDEPENDENTLY stellar.
     override = np.zeros_like(psf_star)
     if bright_pivot is not None and psf_fwhm_px > 0:
         ub = upper_bright if upper_bright is not None else (locus_px + 3.0*mad_px)
         override = (psf_rejected & (mag < bright_pivot)
-                    & (fr > cut_px) & (fr < ub)
+                    & (fr > cut_arr) & (fr < ub)
                     & (np.abs(fwhm - psf_fwhm_px) < 0.15 * psf_fwhm_px)
                     & (ell < 0.10))
         psf_accepted = psf_accepted | override
@@ -273,19 +327,47 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
                marker='x', c='black', linewidths=0.8, zorder=7,
                label=f'Saturated/masked-core ({(saturated & good).sum()})')
     ax.scatter(mag[art], fr[art]*PIX, s=70, facecolor='none', edgecolor='blue',
-               lw=1.3, zorder=5, label=f'Artifacts ({art.sum()})')
-    ax.axhline(locus_px*PIX, color='k', ls='--', lw=1.3, alpha=0.6,
-               label=f'Stellar locus = {locus_px*PIX:.3f}″ ({locus_px:.2f} px)')
-    ax.axhline(cut_px*PIX, color='blue', ls='-', lw=2.0, alpha=0.9,
-               label=f'Artifact cut = locus−3·MAD = {cut_px*PIX:.3f}″ ({cut_px:.2f} px)')
+               lw=1.3, zorder=5, label=f'Artifacts (< tilted cut) ({art.sum()})')
+    # Gaia DR3 confirmed stars — open circles tracing the tilted locus.
+    if gaia_mask is not None:
+        _gm = good & np.asarray(gaia_mask) & (fr > 0)
+        ax.scatter(mag[_gm], fr[_gm]*PIX, s=120, facecolors='none',
+                   edgecolors='red', linewidths=1.5, alpha=0.7, zorder=10,
+                   label=f'Gaia DR3 confirmed ({_gm.sum()})')
+    if tilt is not None:
+        # tilted locus is the operative cut on ground data; the flat constant
+        # locus/cut are shown only as faint grey reference lines.
+        ax.axhline(locus_px*PIX, color='0.6', ls=':', lw=1.1, alpha=0.7,
+                   label=f'constant locus (ref) {locus_px*PIX:.3f}″')
+        ax.axhline(cut_px*PIX, color='0.6', ls='--', lw=1.1, alpha=0.7,
+                   label=f'constant cut (ref) {cut_px*PIX:.3f}″')
+        _tl, _madt, _mlo, _mhi = tilt
+        _mm = np.linspace(_mlo, _mhi, 120)
+        ax.plot(_mm, _tl(_mm)*PIX, color='k', ls='-', lw=2.0, zorder=9,
+                label=f'Stellar locus (tilted, {_tl.c[0]*PIX*1000:+.1f} mas/mag)')
+        ax.plot(_mm, (_tl(_mm)-3.0*_madt)*PIX, color='blue', ls='-', lw=2.0,
+                zorder=9, label='Artifact cut = locus−3·MAD (tilted)')
+    else:
+        ax.axhline(locus_px*PIX, color='k', ls='--', lw=1.3, alpha=0.6,
+                   label=f'Stellar locus = {locus_px*PIX:.3f}″ ({locus_px:.2f} px)')
+        ax.axhline(cut_px*PIX, color='blue', ls='-', lw=2.0, alpha=0.9,
+                   label=f'Artifact cut = locus−3·MAD = {cut_px*PIX:.3f}″ ({cut_px:.2f} px)')
     if sat_onset_mag is not None:
         ax.axvline(sat_onset_mag, color='purple', ls=':', lw=1.8, alpha=0.85,
                    label=f'Saturation onset = {sat_onset_mag:.2f} mag (bright limit)')
     ax.set_xlabel(f'MAG_AUTO ({band_upper}, AB)', fontsize=15, family='serif')
     ax.set_ylabel('Half-light radius FLUX_RADIUS [arcsec]', fontsize=15, family='serif')
-    # ground-based data (HSC, 0.168"/px) can't resolve below ~0.3" half-light,
-    # so floor the y-axis there; space missions keep 0.
-    _ymin = 0.35 if PIX >= 0.15 else 0.0
+    # y-floor: ground-based is per-tile adaptive at locus−5·MAD (tilt-aware —
+    # uses the faint-end tilted locus so the whole band is visible); space
+    # missions keep 0.
+    if PIX >= 0.15:
+        if tilt is not None:
+            _tl, _madt, _mlo, _mhi = tilt
+            _ymin = max(0.0, (_tl(_mhi) - 5.0*_madt) * PIX)
+        else:
+            _ymin = max(0.0, (locus_px - 5.0*mad_px) * PIX)
+    else:
+        _ymin = 0.0
     ax.set_ylim(_ymin, 0.55); ax.set_xlim(13.5, 30.5)
     ax.set_title(f'{band_upper} — Magnitude vs Half-Light Radius',
                  fontsize=13, family='serif')
@@ -777,6 +859,13 @@ def main():
     xx  = np.asarray(pass1['X_IMAGE'], float)
     yy  = np.asarray(pass1['Y_IMAGE'], float)
     print(f'  pass-1 detections: {len(pass1)}')
+    # Gaia DR3 match (ground only) for the tilted-locus overlay on mag-vs-FR
+    gaia_mask = None
+    if PIX >= 0.15 and 'ALPHA_J2000' in pass1.columns.names:
+        gaia_mask = gaia_match(np.asarray(pass1['ALPHA_J2000'], float),
+                               np.asarray(pass1['DELTA_J2000'], float))
+        if gaia_mask is not None:
+            print(f'  Gaia DR3 matched: {int(gaia_mask.sum())}')
 
     # 3. SCI for peak + ncoremask — from the source recorded by 54_ (the
     #    original drz/MER mosaic); no sci_ copy is written anymore.
@@ -876,7 +965,7 @@ def main():
                           xx=cx, yy=cy, accepted_xy=accepted_xy,
                           upper_bright=upper_bright, bright_pivot=bright_pivot,
                           psf_fwhm_px=psf_fwhm_est, sat_onset_mag=sat_onset,
-                          snr_min=snr_min_meta)
+                          snr_min=snr_min_meta, gaia_mask=gaia_mask)
     print(f'     mag_vs_halflight.png')
 
     # mag-vs-chi2 should plot ALL PSFEx-accepted stars (not just in-mosaic);
