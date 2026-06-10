@@ -357,18 +357,22 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
                    label=f'Saturation onset = {sat_onset_mag:.2f} mag (bright limit)')
     ax.set_xlabel(f'MAG_AUTO ({band_upper}, AB)', fontsize=15, family='serif')
     ax.set_ylabel('Half-light radius FLUX_RADIUS [arcsec]', fontsize=15, family='serif')
-    # y-floor: ground-based is per-tile adaptive at locus−5·MAD (tilt-aware —
-    # uses the faint-end tilted locus so the whole band is visible); space
-    # missions keep 0.
+    # y-range (ground): floor at locus−5·MAD (tilt-aware), ceiling at the seeing
+    # FWHM × 1.05.  Seeing FWHM ≈ 2×half-light radius (Gaussian) = 2·locus, shown
+    # as a green dotted reference line.  Space missions keep their fixed range.
     if PIX >= 0.15:
+        seeing = 2.0 * locus_px * PIX                 # FWHM ≈ 2×half-light
+        _ymax = seeing * 1.05
+        ax.axhline(seeing, color='green', ls=':', lw=1.7, alpha=0.85,
+                   label=f'Seeing FWHM = {seeing:.2f}″ ({2.0*locus_px:.2f} px)')
         if tilt is not None:
             _tl, _madt, _mlo, _mhi = tilt
             _ymin = max(0.0, (_tl(_mhi) - 5.0*_madt) * PIX)
         else:
             _ymin = max(0.0, (locus_px - 5.0*mad_px) * PIX)
     else:
-        _ymin = 0.0
-    ax.set_ylim(_ymin, 0.55); ax.set_xlim(13.5, 30.5)
+        _ymin, _ymax = 0.0, 0.55
+    ax.set_ylim(_ymin, _ymax); ax.set_xlim(13.5, 30.5)
     ax.set_title(f'{band_upper} — Magnitude vs Half-Light Radius',
                  fontsize=13, family='serif')
     ax.legend(loc='upper right', fontsize=11, framealpha=0.92)
