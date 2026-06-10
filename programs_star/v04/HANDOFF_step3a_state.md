@@ -1,6 +1,21 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
-## ⚡ RESUME POINT (post app-restart, 2026-06-10 afternoon)
+## ⚡ STATUS 2026-06-10 16:30 — Step 3a-① PSF models 100% COMPLETE
+
+**The LS rerun described below is DONE** (368/368, all `global_pooled`,
+onsets g 17.12 / r 16.75 / i 17.65 / z 15.94, tilt on 368/368, commit
+8a869b37).  The complete Step 3a-① inventory now stands at:
+JWST×4 (80) + HST (20) + Euclid VIS (60) + NISP×3 (60) + HSC×5 (405) +
+LS DR10×4 (368) — every tile with a .psf model, meta JSON, QA plots on the
+web (`html/psf_qa/`, server `cd html && python -m http.server 8000`).
+
+**A NEW SESSION should start directly at the "Next session worklist" section
+below: 3a-② χ²₊ hot+cold detection (51_) → 3a-③ dual SEx+DAO photometry
+(53_) → Step 3b.**  Division of labour: the OLD session continues data
+collection (HSC catalog 41_, GTC, etc.) — it owns download scripts/logs;
+the NEW session owns the v04 step-3 code commits (git pull before commit).
+
+## Historical resume point (completed; kept for the record)
 
 **LS DR10 saturation was redesigned after the user caught bad g-band onsets
 (recorded 19.7–24 where the plots show ~17).**  Final method (user-validated
