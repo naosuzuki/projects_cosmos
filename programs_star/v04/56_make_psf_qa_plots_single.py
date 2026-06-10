@@ -285,7 +285,7 @@ def plot_mag_vs_halflight(out_png, mag, fr, fwhm, ell, ncoremask, locus_px,
     ax.set_ylabel('Half-light radius FLUX_RADIUS [arcsec]', fontsize=15, family='serif')
     # ground-based data (HSC, 0.168"/px) can't resolve below ~0.3" half-light,
     # so floor the y-axis there; space missions keep 0.
-    _ymin = 0.30 if PIX >= 0.15 else 0.0
+    _ymin = 0.35 if PIX >= 0.15 else 0.0
     ax.set_ylim(_ymin, 0.55); ax.set_xlim(13.5, 30.5)
     ax.set_title(f'{band_upper} — Magnitude vs Half-Light Radius',
                  fontsize=13, family='serif')
@@ -340,7 +340,10 @@ def plot_mag_vs_chi2(out_png, mag_acc, chi2_acc, n1_acc, n3_acc, flg_acc, band_u
     ax.set_title(f'PSF-Fit Quality vs Brightness; Neighbour Count in 6 Discrete Bins ({band_upper}).',
                  fontsize=13, family='serif')
     ax.set_xlim(np.floor(mag_acc.min())-0.5, np.ceil(mag_acc.max())+0.5)
-    ax.set_ylim(0.5, max(chi2_acc.max()*1.1, 5))
+    # adaptive floor: ground data (HSC, WEIGHT NONE) has CHI2_PSF well below 1,
+    # which the fixed 0.5 floor hid — drop the floor to the data when needed.
+    _clo = float(np.nanmin(chi2_acc)) if np.asarray(chi2_acc).size else 0.5
+    ax.set_ylim(min(0.5, max(_clo*0.7, 0.005)), max(np.nanmax(chi2_acc)*1.3, 2))
     ax.set_yscale('log')
     ax.grid(alpha=0.25, which='both')
     yticks = [0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0]
@@ -380,10 +383,19 @@ def plot_mag_vs_chi2(out_png, mag_acc, chi2_acc, n1_acc, n3_acc, flg_acc, band_u
 
 
 def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
-                         sat_peak_level=None, sat_onset_mag=None):
+                         sat_peak_level=None, sat_onset_mag=None,
+                         psf_star_mask=None):
     ok = np.isfinite(mag) & (mag > 13) & (mag < 30)
+    # bright/high-SNR point sources — these trace the (saturated) bright
+    # sequence and are EXCLUDED from the PSF model; do not confuse with the
+    # PSF model stars (red, below).  Kept only as context for the onset.
     is_point = (cs > 0.8) & (snr > 100)
     sat = ncoremask > 0
+    # the actual PSF-model star sample (matched back to the detection catalog
+    # by the caller); these are what should be highlighted in red.
+    if psf_star_mask is None:
+        psf_star_mask = np.zeros(len(mag), bool)
+    is_psf = psf_star_mask & ok
     has_pk = (sat_peak_level is not None) and np.isfinite(sat_peak_level)
     has_on = (sat_onset_mag is not None) and np.isfinite(sat_onset_mag)
 
@@ -402,14 +414,18 @@ def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
     ax = axes[0]
     ax.scatter(mag[ok], peak[ok], s=4, c='lightgray', alpha=0.4,
                label='All', rasterized=True)
-    ax.scatter(mag[ok & is_point], peak[ok & is_point], s=8, c='red', alpha=0.7,
-               label=f'Point sources ({(ok & is_point).sum()})', rasterized=True)
+    ax.scatter(mag[ok & is_point], peak[ok & is_point], s=8, c='darkorange',
+               alpha=0.6,
+               label=f'Bright/saturated, excluded ({(ok & is_point).sum()})',
+               rasterized=True)
+    ax.scatter(mag[is_psf], peak[is_psf], s=14, c='red', alpha=0.85, zorder=7,
+               label=f'PSF model stars ({is_psf.sum()})', rasterized=True)
     draw_sat_lines(ax)
     ax.set_yscale('log')
     ax.set_xlabel(f'MAG_AUTO ({band_upper}, AB)', fontsize=13, family='serif')
     ax.set_ylabel('Peak Count FLUX_MAX [image units]', fontsize=13, family='serif')
-    ax.set_title('Peak Counts vs Magnitude (Plateau / Masked Core at Bright End = SATURATION)',
-                 fontsize=12, family='serif')
+    ax.set_title('Peak Counts vs Magnitude — PSF stars (red) sit faintward of saturation onset',
+                 fontsize=11, family='serif')
     ax.legend(loc='upper right', fontsize=10)
     ax.grid(alpha=0.25, which='both')
     ax.set_xlim(13.5, 30.5)
@@ -418,19 +434,27 @@ def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
     ax.tick_params(which='minor', length=3); ax.minorticks_on()
 
     ax = axes[1]
-    brt = ok & (mag < 22)
-    ax.scatter(mag[brt & is_point], peak[brt & is_point], s=12, c='red',
-               label='Point sources', rasterized=True)
-    ax.scatter(mag[brt & sat], peak[brt & sat], s=40, marker='o',
+    # zoom that spans BOTH the saturated bright sequence and the PSF stars so
+    # the user can see the red PSF stars relative to the onset line.
+    brt = ok & (mag < 25.5)
+    ax.scatter(mag[brt], peak[brt], s=5, c='lightgray', alpha=0.4,
+               label='All', rasterized=True)
+    ax.scatter(mag[brt & is_point], peak[brt & is_point], s=12, c='darkorange',
+               alpha=0.7, label='Bright/saturated, excluded', rasterized=True)
+    ax.scatter(mag[brt & sat], peak[brt & sat], s=44, marker='o',
                facecolor='none', edgecolor='blue', linewidths=1.5,
                label='Masked core (>0 px)', zorder=5, rasterized=True)
+    ax.scatter(mag[is_psf & brt], peak[is_psf & brt], s=16, c='red', alpha=0.85,
+               zorder=7, label='PSF model stars', rasterized=True)
     draw_sat_lines(ax)
+    ax.set_yscale('log')
     ax.set_xlabel(f'MAG_AUTO ({band_upper}, AB)', fontsize=13, family='serif')
     ax.set_ylabel('Peak Count FLUX_MAX [image units]', fontsize=13, family='serif')
-    ax.set_title('Bright-End Zoom — Saturation Level (magenta dotted)', fontsize=12, family='serif')
+    ax.set_title('Zoom — saturated bright sequence (orange) vs PSF stars (red)',
+                 fontsize=11, family='serif')
     ax.legend(loc='upper right', fontsize=10)
-    ax.set_xlim(13.5, 22.5)
-    ax.xaxis.set_major_locator(MultipleLocator(1))
+    ax.set_xlim(13.5, 25.5)
+    ax.xaxis.set_major_locator(MultipleLocator(2))
     ax.grid(True, which='major', alpha=0.4)
     ax.tick_params(which='both', direction='in', top=True, right=True,
                    labelsize=11, length=6)
@@ -442,7 +466,7 @@ def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
 
 def plot_psf_mosaics(out_samp_png, out_resi_png, samp, resi, ocd,
                      in_mosaic_idx, det_cat, band_upper,
-                     n_accepted_total=None):
+                     n_accepted_total=None, crop_cell=None):
     """psf_samples.png + psf_residuals.png — uses the same vmin/vmax (sqrt)
     derived from the samples mosaic.  All cells labelled, FLAGS_PSF≠0
     cells get a red frame; high-χ² accepted cells get an orange frame."""
@@ -463,6 +487,19 @@ def plot_psf_mosaics(out_samp_png, out_resi_png, samp, resi, ocd,
     nrow = samp.shape[0] // cs
     ncol = samp.shape[1] // cs
     print(f'  mosaic cell size detected: {cs}×{cs}, grid {nrow}×{ncol}', flush=True)
+    # Ground data: crop each cell to the small PSF-model region so distant
+    # background galaxies (in the wide VIGNET but outside the model) don't show.
+    if crop_cell and 8 < int(crop_cell) < cs:
+        cw = int(crop_cell) | 1; off = (cs - cw) // 2
+        def _crop(m):
+            o = np.zeros((nrow*cw, ncol*cw), m.dtype)
+            for rr in range(nrow):
+                for cc in range(ncol):
+                    o[rr*cw:(rr+1)*cw, cc*cw:(cc+1)*cw] = \
+                        m[rr*cs+off:rr*cs+off+cw, cc*cs+off:cc*cs+off+cw]
+            return o
+        samp = _crop(samp); resi = _crop(resi); cs = cw
+        print(f'  cropped cells to {cs}px (PSF-model region)', flush=True)
     ax_ = np.asarray(mos['X_IMAGE']); ay = np.asarray(mos['Y_IMAGE'])
     chi2_psf = np.asarray(mos['CHI2_PSF']); flgpsf = np.asarray(mos['FLAGS_PSF'])
 
@@ -762,9 +799,15 @@ def main():
     acc_full_y = np.asarray(ocd['Y_IMAGE'])[accepted_all_mask]
     chi2_full  = np.asarray(ocd['CHI2_PSF'])[accepted_all_mask]
     mag_full2 = np.zeros(len(acc_full_x)); flg_full2 = np.zeros(len(acc_full_x), int)
+    psf_match_idx = np.empty(len(acc_full_x), int)
     for k in range(len(acc_full_x)):
         j = ((cx-acc_full_x[k])**2 + (cy-acc_full_y[k])**2).argmin()
         mag_full2[k] = mag[j]; flg_full2[k] = flg[j]
+        psf_match_idx[k] = j
+    # boolean mask over the detection catalog marking the PSF model stars, so
+    # the saturation plot can overplot the ACTUAL selected sample in red.
+    psf_star_mask = np.zeros(len(mag), bool)
+    psf_star_mask[psf_match_idx] = True
     n1_full = np.array([len(tree.query_ball_point([acc_full_x[k], acc_full_y[k]], 1.0/PIX))-1
                         for k in range(len(acc_full_x))])
     n3_full = np.array([len(tree.query_ball_point([acc_full_x[k], acc_full_y[k]], 3.0/PIX))-1
@@ -783,7 +826,8 @@ def main():
         _spk, _smag = _m.get('sat_peak_level'), _m.get('sat_onset_mag')
     plot_saturation_peak(psf_dir / 'saturation_peak.png',
                          mag, peak, cs, snr, ncoremask, band_upper,
-                         sat_peak_level=_spk, sat_onset_mag=_smag)
+                         sat_peak_level=_spk, sat_onset_mag=_smag,
+                         psf_star_mask=psf_star_mask)
     print(f'     saturation_peak.png  (sat_peak={_spk}, onset_mag={_smag})')
 
     # total accepted comes from the FULL OUTCAT (matches mag_vs_halflight),
@@ -792,7 +836,8 @@ def main():
     plot_psf_mosaics(psf_dir / 'psf_samples.png',
                      psf_dir / 'psf_residuals.png',
                      samp, resi, ocd, in_mosaic_idx, pass1, band_upper,
-                     n_accepted_total=n_accepted_total)
+                     n_accepted_total=n_accepted_total,
+                     crop_cell=_m.get('psf_size_px'))   # ground: show only the model region
     print(f'     psf_samples.png / psf_residuals.png  '
           f'(total accepted={n_accepted_total})')
 

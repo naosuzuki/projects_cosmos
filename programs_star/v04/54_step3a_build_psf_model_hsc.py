@@ -86,10 +86,21 @@ def parse_args():
                    help='SNR_WIN floor for PSF stars.  HSC WEIGHT-NONE SNR_WIN '
                         'is on a compressed scale (max ~250); 8 reaches the '
                         'faint end of the clean stellar locus (~mag 24).')
-    p.add_argument('--faint-mag', type=float, default=24.0,
-                   help='Faint magnitude limit for PSF stars.  The HSC stellar '
-                        'locus is clean from ~19 to ~24 mag; beyond ~24 the '
-                        'FLUX_RADIUS scatters into the galaxy sea.')
+    p.add_argument('--nbr-fwhm', type=float, default=2.5,
+                   help='Neighbour radius in units of PSF FWHM.  Reject a PSF star '
+                        'if ANY detected object lies within this radius (no '
+                        'brightness gate — inside the fit core even a faint '
+                        'neighbour matters).  2.5xFWHM = the model stamp; distant '
+                        'galaxies are outside the (small) model so they are '
+                        'harmless (strict wider isolation would gut the COSMOS '
+                        'sample: 6" -> 3%% of stars).')
+    p.add_argument('--psf-fwhm', type=float, default=2.5,
+                   help='PSF model stamp radius in FWHM units (PSF_SIZE).')
+    p.add_argument('--nbr-dmag', type=float, default=2.5,
+                   help='Brightness gate: only neighbours within --nbr-radius that '
+                        'are <this many mag fainter than the star contaminate.  '
+                        'Avoids rejecting stars next to faint background galaxies '
+                        '(in galaxy-dense COSMOS ~half have a faint object <2").')
     p.add_argument('--reuse-pass1', action='store_true')
     return p.parse_args()
 
@@ -177,8 +188,13 @@ def main():
     is_pt = (cs > 0.8) & (snr > a.snr_min)
     sat_pt = saturated & is_pt & np.isfinite(mag)
     onset_mag = float(np.percentile(mag[sat_pt], 90)) if sat_pt.sum() >= 5 else None
-    print(f'  saturation : {int(saturated.sum())} MASK-SAT cores  '
-          f'(onset_mag={onset_mag if onset_mag is None else round(onset_mag,2)})')
+    # bright limit = the MEASURED saturation magnitude: veto everything brighter
+    # than the onset (uses the measurement, same convention as the other
+    # missions — no ad-hoc magnitude cut).
+    if onset_mag is not None and np.isfinite(onset_mag):
+        saturated = saturated | (np.isfinite(mag) & (mag < onset_mag))
+    print(f'  saturation : {int(saturated.sum())} excluded  '
+          f'(measured saturation mag = {onset_mag if onset_mag is None else round(onset_mag,2)})')
 
     # ── Gaia-DR3-anchored stellar locus (immune to compact-galaxy bias) ──
     gaia_star = gaia_star_mask(xx, yy, imhdr, radius_arcsec=0.6)
@@ -221,26 +237,42 @@ def main():
     for k in np.where(cheap)[0]:
         box = mask[yiv[k]-VIG_HALF:yiv[k]+VIG_HALF+1, xiv[k]-VIG_HALF:xiv[k]+VIG_HALF+1]
         gap_masked[k] = int(np.sum((box & GAP_REJECT) != 0)) > 5
+    # neighbour contamination: reject when a DETECTED companion lies within the
+    # PSF model stamp (~3.4") and is no more than DMAG fainter.  The old 1"
+    # radius was far smaller than the 3.4" stamp, so companions at 1-3.4"
+    # escaped it; aggressive SExtractor deblending (hsc_<b>.sex) recovers blended
+    # companions so they appear here as catalog detections.
     tree = cKDTree(np.column_stack([xx, yy]))
-    r_pix = 1.0 / PIXSCALE
-    n1 = np.array([len(tree.query_ball_point([xx[k], yy[k]], r_pix)) - 1
-                   for k in range(len(obj))])
-    contaminated = (n1 >= 2) & (flg < 2)
+    fwhm_px = 2.0 * med                    # PSF FWHM from the half-light locus
+    R_nbr   = a.nbr_fwhm * fwhm_px         # isolation radius (px) = N x FWHM
+    # STRICT isolation: reject if ANY detected object lies within R_nbr.  Galaxy-
+    # dense COSMOS has faint neighbours everywhere, so this trades sample size for
+    # cleanliness (no brightness gate — even faint galaxies disqualify a star).
+    contaminated = np.zeros(len(obj), bool)
+    cand = (cs > 0.8) & (snr > a.snr_min) & (fr > 0)
+    for k in np.where(cand)[0]:
+        for j in tree.query_ball_point([xx[k], yy[k]], R_nbr):
+            if j != k:
+                contaminated[k] = True; break
+    # PSF model stamp is SMALLER than the isolation radius — the fit core is then
+    # guaranteed clean even if a galaxy sits just outside the isolation circle.
+    psf_size = int(round(2.0 * a.psf_fwhm * fwhm_px)) | 1
     e_round = ell < 0.20
 
     # FR band — tight at faint (rejects galaxies), relaxed at the bright end
     upper_bright = med + 6.0 * mad
     upper_arr = np.where(np.isfinite(mag) & (mag < bright_pivot), upper_bright, upper)
     keep_fr = (fr > cut) & (fr < upper_arr)
-    # faint magnitude limit: the clean stellar locus runs ~19-24 mag; beyond
-    # ~24 the FLUX_RADIUS scatters into the galaxy sea (bright end = saturation)
-    mag_ok = np.isfinite(mag) & (mag < a.faint_mag)
+    # NO ad-hoc magnitude cut: bright end = measured saturation mag (above),
+    # faint end = S/N floor + the FLUX_RADIUS locus band (rejects the galaxy sea)
     star = ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
-            & keep_fr & e_round & mag_ok
+            & keep_fr & e_round
             & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
     print(f'  PSF stars selected : {star.sum()}   '
-          f'(mag<{a.faint_mag:.1f}; saturated/bad excl {saturated.sum()}, '
-          f'gap {gap_masked.sum()}, contam {contaminated.sum()})')
+          f'(bright=sat mag, faint=SNR>{a.snr_min:.0f}+locus; saturated/bad excl '
+          f'{saturated.sum()}, gap {gap_masked.sum()}, '
+          f'isolation (any nbr <{a.nbr_fwhm:.1f}xFWHM={R_nbr*PIXSCALE:.2f}\") '
+          f'{int(contaminated.sum())}; PSF_SIZE={psf_size}px)')
 
     # ── two-pass PSFEx: validate, then rebuild from accepted∪bright-override ──
     sel_idx = np.where(star)[0]
@@ -252,6 +284,7 @@ def main():
     r = subprocess.run(['psfex', str(all_cat), '-c', str(CONFIGS / 'psfex_hsc.psfex'),
                         '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
                         '-SAMPLE_MINSN', f'{a.snr_min:.1f}',
+                        '-PSF_SIZE', f'{psf_size},{psf_size}',
                         '-OUTCAT_TYPE', 'FITS_LDAC', '-OUTCAT_NAME', str(p1out),
                         '-CHECKIMAGE_TYPE', 'NONE'], capture_output=True, text=True)
     if r.returncode != 0:
@@ -280,10 +313,16 @@ def main():
     hcat[2].data = obj[sel_idx][model_mask]; hcat.writeto(star_cat, overwrite=True)
     print(f'  wrote {star_cat.name} ({n_mod} model stars: {n_acc} PSFEx + {n_ovr} bright anchors)')
 
-    print('── PSFEx pass 2 (final model, bright anchors retained) ──', flush=True)
+    # PSF_ACCURACY 0.5 only when there are bright shape-override anchors to
+    # protect from PSFEx's chi2-cleaning (the NISP case).  HSC saturates early
+    # → 0 bright anchors, so use the normal tight 0.01: a proper fit WITH
+    # PSFEx's standard cleaning of the noisy faint stars (no over-smoothing).
+    acc2 = '0.5' if n_ovr > 0 else '0.01'
+    print(f'── PSFEx pass 2 (final model; PSF_ACCURACY {acc2}) ──', flush=True)
     cmd = ['psfex', str(star_cat), '-c', str(CONFIGS / 'psfex_hsc.psfex'),
            '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
-           '-SAMPLE_MINSN', f'{a.snr_min:.1f}', '-PSF_ACCURACY', '0.5',
+           '-SAMPLE_MINSN', f'{a.snr_min:.1f}', '-PSF_ACCURACY', acc2,
+           '-PSF_SIZE', f'{psf_size},{psf_size}',
            '-CHECKIMAGE_TYPE', 'RESIDUALS,PROTOTYPES,SNAPSHOTS,SAMPLES',
            '-CHECKIMAGE_NAME',
            f'{out}/resi.fits,{out}/proto.fits,{out}/snap.fits,{out}/samp.fits']
@@ -321,15 +360,19 @@ def main():
         'n_gaia_matched': int(gaia_star.sum()),
         'sat_onset_mag': onset_mag,
         'snr_min': float(a.snr_min),
-        'faint_mag': float(a.faint_mag),
         'n_psf_stars': int(star.sum()),
         'n_psfex_accepted': n_acc,
         'n_override_bright': n_ovr,
         'n_model_stars': n_mod,
-        'psf_accuracy_pass2': 0.5,
+        'psf_accuracy_pass2': float(acc2),
         'n_saturated_excluded': int(saturated.sum()),
         'n_gap_masked_excluded': int(gap_masked.sum()),
         'n_contaminated_excluded': int(contaminated.sum()),
+        'nbr_fwhm': float(a.nbr_fwhm),
+        'psf_fwhm': float(a.psf_fwhm),
+        'nbr_radius_arcsec': float(R_nbr * PIXSCALE),
+        'fwhm_px': float(fwhm_px),
+        'psf_size_px': int(psf_size),
         'psf_chi2': float(ph.get('CHI2', -1)), 'psf_fwhm_px': float(ph.get('PSF_FWHM', -1)),
         'psf_accepted': int(ph.get('ACCEPTED', -1)), 'psf_model': str(psf),
         'recipe': 'HSC LSST calexp IMAGE[1]; WEIGHT NONE; MASK-bit saturation; '
