@@ -1,5 +1,32 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
+## ⚡ RESUME POINT (post app-restart, 2026-06-10 afternoon)
+
+**LS DR10 saturation was redesigned after the user caught bad g-band onsets
+(recorded 19.7–24 where the plots show ~17).**  Final method (user-validated
+on brick 1493p017 g): GLOBAL per-band onset from `64_step3a_lsdr10_global_
+saturation.py` — pooled Gaia-anchored peak turnover on the **Gaia G axis**
+(saturated stars slide along MAG_AUTO-based relations, hiding the break;
+G is an external truth axis) + band−G color + p95 MAG_AUTO slide margin.
+Values in `programs_star/csv_saturation/lsdr10_global_onsets.json`:
+**g 17.12, r 16.75, i 17.65, z 15.94** (g matches the user's eyeball ~17).
+The builder (54_lsdr10) reads the JSON automatically (`global_pooled`).
+
+**On-disk LS models are a PATCHWORK of debugging generations** (145 old
+percentile / 140 bleed-contaminated maskbits / 58 none / 24 intermediates /
+1 final).  **FIRST ACTION: full force rerun:**
+```
+python 60_run_mass_production.py --missions lsdr10 --force
+# + live web refresher loop (55_make_psf_qa_site.py every 120 s)
+```
+then the QA sweep (tilt on?, MADt<0.15?, n_model_stars, onsets uniform),
+user spot-check of LS-g saturation plots on the web, commit timing CSV.
+A corrupt half-written pass1 (killed run) was the `Empty or corrupt FITS`
+crash — 64_/sweeps now skip/remove unreadable pass1 files.
+
+Background context for the restart: the gh-CLI banner glitch = stale app
+process state (token itself verified working); restart fixes it.
+
 For the next session: read this + ms.tex §B.1 (locked Step 3a/3b/4/5 plan,
 `~/github/papers/26_jwsteuclidhst_note/ms.tex` lines ~1320–1670).
 

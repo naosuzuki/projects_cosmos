@@ -40,6 +40,74 @@ def core_peak(sci, xx, yy, half=2, idx=None):
     return peak
 
 
+def detect_saturation_turnover(mag, peak, is_point, dev_dex=0.12, slope=-0.4):
+    """Saturation onset for SOFT-saturating coadds (DECam LS DR10).
+
+    DECam brick coadds interpolate/suppress saturated cores, so peak-vs-mag
+    never pins to a flat plateau (the HST signature) — it BENDS: the growth
+    rate drops below the photometric slope (-0.4 dex/mag) and may even
+    decline.  Detect the bend: onset = the faintest 0.5-mag bin whose median
+    peak falls > `dev_dex` BELOW the fixed-slope extrapolation anchored on
+    the 3 bins immediately fainter, with the deficit PERSISTING brighter
+    (median deficit of all brighter bins also > dev_dex).
+
+    Returns (sat_peak_level, onset_mag); level = predicted unsaturated peak
+    at the onset (diagnostic line), np.inf if no turnover found.
+    """
+    mag = np.asarray(mag, float); peak = np.asarray(peak, float)
+    is_point = np.asarray(is_point, bool)
+    sel = is_point & np.isfinite(mag) & np.isfinite(peak) & (peak > 0)
+    if sel.sum() < 20:
+        return np.inf, None
+    ms, ps = mag[sel], np.log10(peak[sel])
+
+    # 1. robust log-linear reference fit on the clearly-UNSATURATED range:
+    #    the brightest 1.5 mag of point sources are suspect, the faint tail is
+    #    noisy → fit between [p5+1.5, p5+5] (p5 = 5th-percentile magnitude),
+    #    iteratively clipped.  Empirical slope (≈-0.45..-0.55 in MAG_AUTO
+    #    space, steeper than the textbook -0.4).
+    p5 = float(np.percentile(ms, 5))
+    fit = (ms > p5 + 1.5) & (ms < p5 + 5.0)
+    if fit.sum() < 15:
+        return np.inf, None
+    kp = fit.copy()
+    b = (slope, 0.0)
+    for _ in range(5):
+        if kp.sum() < 10:
+            break
+        b = np.polyfit(ms[kp], ps[kp], 1)
+        r = ps - np.polyval(b, ms)
+        s = 1.4826 * float(np.median(np.abs(r[kp] - np.median(r[kp]))))
+        if s <= 0:
+            break
+        kp = fit & (np.abs(r) < 3.0 * s)
+    if not (-0.65 <= b[0] <= -0.30):                 # sanity on the slope
+        return np.inf, None
+
+    # 2. PER-STAR deficits brighter than the fit range (no binning — the
+    #    saturated bright end is sparse, 1-3 stars per 0.5 mag; bin medians
+    #    discard exactly the evidence).  Walk stars FAINT→BRIGHT: onset = the
+    #    faintest star such that >=70% of all stars brighter than it
+    #    (minimum 3) sit > dev_dex BELOW the reference line.
+    deficit = np.polyval(b, ms) - ps                 # >0 = below the line
+    br = ms <= p5 + 1.5
+    if br.sum() < 3:
+        return np.inf, None
+    order = np.argsort(ms[br])[::-1]                 # faint → bright
+    dm, dd = ms[br][order], deficit[br][order]
+    onset, level = None, np.inf
+    for j in range(len(dm)):
+        nb = len(dm) - j                             # stars at or brighter
+        if nb < 3:
+            break
+        frac = float(np.mean(dd[j:] > dev_dex))
+        if frac >= 0.70:
+            onset = float(dm[j] + 0.25)              # just faintward of star j
+            level = float(10.0 ** np.polyval(b, dm[j]))
+            break
+    return level, onset
+
+
 def detect_saturation(mag, peak, masked_core, is_point):
     """Return (sat_peak_level, onset_mag); see module docstring."""
     mag = np.asarray(mag, float); peak = np.asarray(peak, float)

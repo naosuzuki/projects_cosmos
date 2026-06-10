@@ -29,6 +29,8 @@ import numpy as np
 from astropy.io import fits
 from scipy.spatial import cKDTree
 
+from psf_saturation import core_peak, detect_saturation_turnover
+
 PROJECT = Path('/Users/suzuki/github/projects_cosmos')
 CONFIGS = PROJECT / 'configs'
 LS_DIR  = Path('/Volumes/exdisk1/data/DESI_Legacy/COSMOS/dr10/south/coadd')
@@ -164,31 +166,47 @@ def main():
     xx   = np.asarray(obj['X_IMAGE'], float);   yy = np.asarray(obj['Y_IMAGE'], float)
 
     ny, nx = sci.shape
-    # ── saturation = maskbits SATUR|ALLMASK bits in the stellar core ──
+    # ── saturation: shared peak-plateau detector (psf_saturation.py) ─────────
+    # DECam SATUR maskbits run along whole BLEED COLUMNS and bright-star
+    # halos, so faint stars sitting on them get core-flagged — any estimator
+    # built from "magnitudes of flagged sources" is dragged faintward (the
+    # first-pass 90th-percentile gave 20-21.6 where the true onset is ~17).
+    # The plateau of peak counts vs magnitude IS the saturation measurement
+    # (same physics as HST ACS); the SATUR core bits remain as the per-source
+    # rejection for anything touching a bleed.
     half = a.core_box // 2
     xi = np.clip(np.round(xx).astype(int), half, nx-half-1)
     yi = np.clip(np.round(yy).astype(int), half, ny-half-1)
-    saturated = np.zeros(len(obj), bool)
+    satcore = np.zeros(len(obj), int)
     for k in range(len(obj)):
         box = mask[yi[k]-half:yi[k]+half+1, xi[k]-half:xi[k]+half+1]
-        saturated[k] = bool(np.any(box & core_reject))
+        satcore[k] = int(np.sum((box & core_reject) != 0))
     is_pt = (cs > 0.8) & (snr > a.snr_min)
-    sat_pt = saturated & is_pt & np.isfinite(mag)
-    onset_mag = float(np.percentile(mag[sat_pt], 90)) if sat_pt.sum() >= 5 else None
-    # sanity clamp: a real onset is BRIGHTER than the bulk of the point
-    # sources; an onset fainter than their median means the mask test is
-    # blanket-flagging (low-nexp artifact pathology) — treat as no onset.
-    if onset_mag is not None:
-        med_pt = float(np.nanmedian(mag[is_pt & np.isfinite(mag)]))
-        if not np.isfinite(onset_mag) or onset_mag > med_pt:
-            print(f'  [warn] measured onset {onset_mag:.2f} > point-source '
-                  f'median {med_pt:.2f} — implausible, ignoring onset')
-            onset_mag = None
-    # bright limit = the MEASURED saturation magnitude (no ad-hoc cut)
+    # GLOBAL per-band onset (64_step3a_lsdr10_global_saturation.py): DECam
+    # saturation is a (camera, band) property — same full well + ~uniform
+    # survey exposures everywhere — so the onset is measured ONCE per band by
+    # pooling bright stars across bricks (per-brick estimates fail: 1-6 stars
+    # per 0.5-mag bin).  The per-source SATUR-core veto handles local bleeds.
+    sat_peak_level, peak_saturated = np.inf, np.zeros(len(obj), bool)
+    onset_mag, sat_onset_method = None, None
+    gj = PROJECT / 'programs_star' / 'csv_saturation' / 'lsdr10_global_onsets.json'
+    if gj.exists():
+        gv = json.loads(gj.read_text()).get('bands', {}).get(band, {})
+        if gv.get('sat_onset_mag') is not None:
+            onset_mag = float(gv['sat_onset_mag'])
+            sat_onset_method = 'global_pooled'
+    if onset_mag is None:                          # fallback: this brick alone
+        peak = core_peak(sci, xx, yy, half=half, idx=np.where(is_pt)[0])
+        sat_peak_level, onset_mag = detect_saturation_turnover(mag, peak, is_pt)
+        if onset_mag is not None:
+            sat_onset_method = 'turnover_local'
+        peak_saturated = np.isfinite(peak) & (peak >= sat_peak_level)
+    saturated = (satcore > 0) | peak_saturated
     if onset_mag is not None and np.isfinite(onset_mag):
         saturated = saturated | (np.isfinite(mag) & (mag < onset_mag))
     print(f'  saturation : {int(saturated.sum())} excluded  '
-          f'(measured saturation mag = {onset_mag if onset_mag is None else round(onset_mag,2)})')
+          f'(onset = {onset_mag if onset_mag is None else round(onset_mag,2)} '
+          f'[{sat_onset_method}]; core-bits {int((satcore>0).sum())})')
 
     # ── Gaia-DR3-anchored stellar locus (immune to compact-galaxy bias) ──
     gaia_star = gaia_star_mask(xx, yy, imhdr, radius_arcsec=0.6)
@@ -203,7 +221,6 @@ def main():
     # scanning bright-ward, the first 0.5-mag bin whose median FR departs
     # >2·MAD above the ridge marks saturation bloat.  Mirror image of the
     # faint purity limit — measured, not ad-hoc.
-    sat_onset_method = 'maskbits' if onset_mag is not None else None
     if onset_mag is None and int(locus_base.sum()) >= 20:
         gm, gf = mag[locus_base], fr[locus_base]
         gok = np.isfinite(gm) & np.isfinite(gf)
@@ -455,6 +472,9 @@ def main():
         'n_gaia_matched': int(gaia_star.sum()),
         'sat_onset_mag': onset_mag,
         'sat_onset_method': sat_onset_method,
+        'sat_peak_level': (None if not np.isfinite(sat_peak_level)
+                           else float(sat_peak_level)),
+        'n_peak_saturated': int(peak_saturated.sum()),
         'snr_min': float(a.snr_min),
         'n_psf_stars': int(star.sum()),
         'n_psfex_accepted': n_acc,
