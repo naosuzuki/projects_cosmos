@@ -19,7 +19,7 @@ mission, tile).  STARS ONLY (3b is_star).  Requested 2026-06-11:
   Plot 3  diag3_psf_composite_<tile>.png
       drizzle-style shift-and-add composite of all clean star stamps
       (unsaturated, n₁=0), oversampled ×9, simply summed; per band,
-      log stretch.
+      sqrt stretch, stamp radius ±1.2″.
   Plot 4  diag4_psf_profile_<tile>.png
       horizontal profile cut through the composite peak, x in arcsec
       (native px on the top axis), y normalized to the peak.
@@ -59,6 +59,7 @@ _spec53.loader.exec_module(dual_phot)
 band_measurement = dual_phot.band_measurement
 
 OVER = 9                      # plot-3 oversampling factor
+PSF_RADIUS_ARCSEC = 1.2       # plot-3/4 composite stamp radius
 
 
 def clean_mag(a) -> np.ndarray:
@@ -242,46 +243,62 @@ def drizzle_composite(sci, xs, ys, half_native: int):
     return comp[OVER:-OVER, OVER:-OVER], nused
 
 
-def plots34_psf(stars, n1, bands, mission, tile, spec, out3, out4):
-    fig3, axes3 = plt.subplots(1, len(bands), figsize=(4.4 * len(bands), 4.6),
-                               squeeze=False)
+def plots34_psf(stars, n1, bands, mission, tile, spec, phot_dir):
     fig4, ax4 = plt.subplots(figsize=(8.5, 5.5))
     pixscale = spec['pixscale']
     info = {}
     for k, b in enumerate(bands):
-        ax = axes3[0][k]
         if f'{b}_MAG_PSF' not in stars.colnames:
-            ax.set_axis_off()
             continue
+        figb, ax = plt.subplots(figsize=(6.5, 6.2))
         sat = np.asarray(stars[f'{b}_IS_SATURATED'], dtype=bool)
         mag = clean_mag(stars[f'{b}_MAG_PSF'])
         use = (~sat) & (n1 == 0) & np.isfinite(mag)
         _, _, loader = band_measurement(mission, tile, b)
         if loader is None or use.sum() == 0:
-            ax.set_axis_off()
+            plt.close(figb)
             continue
         sci = np.asarray(loader(), dtype=np.float32)
-        fwhm_px = empirical_fwhm_arcsec(mission, tile, b)[0] / pixscale
-        half = max(15, int(round(6 * fwhm_px)))
+        half = int(round(PSF_RADIUS_ARCSEC / pixscale))   # fixed ±1.2"
         comp, nused = drizzle_composite(
             sci, np.asarray(stars['X_IMAGE'], dtype=float)[use] - 1,
             np.asarray(stars['Y_IMAGE'], dtype=float)[use] - 1, half)
         del sci
         if comp.max() <= 0:
-            ax.set_axis_off()
+            plt.close(figb)
             continue
         comp /= comp.max()
         ext = (np.array([-1, 1, -1, 1]) * (half + 0.5) * pixscale)
-        ax.imshow(np.log10(np.clip(comp, 1e-6, 1)), origin='lower',
-                  cmap='inferno', vmin=-5, vmax=0, extent=ext)
-        ax.set_title(f'{b}  ({nused} stars, ×{OVER})', fontsize=10)
+        ax.imshow(np.sqrt(np.clip(comp, 0, 1)), origin='lower',
+                  cmap='inferno', vmin=0, vmax=1, extent=ext)
+        ax.set_title(f'{tile} {b} composite PSF — drizzle ×{OVER}, '
+                     f'{nused} clean stars, sqrt stretch', fontsize=10)
         ax.set_xlabel('arcsec')
-        if k == 0:
-            ax.set_ylabel('arcsec')
-        # plot 4: horizontal cut through the peak
+        ax.set_ylabel('arcsec')
+        figb.tight_layout()
+        out3b = phot_dir / f'diag3_psf_composite_{tile}_{b}.png'
+        figb.savefig(out3b, dpi=130)
+        plt.close(figb)
+        # plot 4 per band + the cross-band overlay
         py, px = np.unravel_index(np.argmax(comp), comp.shape)
         cut = comp[py]
         xax = (np.arange(comp.shape[1]) - px) / OVER * pixscale
+        fig4b, ax4b = plt.subplots(figsize=(8.5, 5.5))
+        ax4b.plot(xax, cut, lw=1.4, color='tab:red')
+        ax4b.set_xlabel('offset [arcsec]')
+        sec = ax4b.secondary_xaxis('top', functions=(
+            lambda a: a / pixscale, lambda q: q * pixscale))
+        sec.set_xlabel('offset [native pixel]')
+        ax4b.set_ylabel('normalized at peak')
+        ax4b.set_yscale('log')
+        ax4b.set_ylim(1e-5, 1.5)
+        ax4b.axhline(0.5, color='0.7', lw=0.6, ls=':')
+        ax4b.set_title(f'{tile} {b} composite-PSF profile cut '
+                       f'(×{OVER} drizzle, {nused}★)')
+        fig4b.tight_layout()
+        fig4b.savefig(phot_dir / f'diag4_psf_profile_{tile}_{b}.png',
+                      dpi=130)
+        plt.close(fig4b)
         ax4.plot(xax, cut, lw=1.4, label=f'{b} ({nused}★)')
         info[b] = nused
     ax4.set_xlabel('offset [arcsec]')
@@ -294,13 +311,8 @@ def plots34_psf(stars, n1, bands, mission, tile, spec, out3, out4):
     ax4.axhline(0.5, color='0.7', lw=0.6, ls=':')
     ax4.legend()
     ax4.set_title(f'{tile} composite-PSF profile cuts (×{OVER} drizzle)')
-    fig3.suptitle(f'{tile} composite PSFs — drizzle ×{OVER}, clean stars '
-                  f'(unsaturated, n₁=0), log stretch', y=1.02)
-    fig3.tight_layout()
-    fig3.savefig(out3, dpi=130, bbox_inches='tight')
     fig4.tight_layout()
-    fig4.savefig(out4, dpi=130)
-    plt.close(fig3)
+    fig4.savefig(phot_dir / f'diag4_psf_profile_{tile}.png', dpi=130)
     plt.close(fig4)
     return info
 
@@ -347,24 +359,20 @@ def main():
         stars = join(stars, dao[keep], keys='SOURCE_ID', join_type='left')
 
     n1 = n1_neighbours(stars, merged)
-    band_ref = args.band_ref or bands[min(1, len(bands)-1)]
-    mag_ref = clean_mag(stars[f'{band_ref}_MAG_PSF'])
-
     outline = tile_outline(tdir / f'chi2_{args.tile}.fits')
     print(f'{args.mission}/{args.tile}: {len(stars)} stars, '
           f'{int((n1 == 0).sum())} isolated; bands {bands}')
 
-    p1 = phot_dir / f'diag1_stars_radec_{args.tile}.png'
-    plot1_radec(stars, n1, mag_ref, outline, p1, args.tile, band_ref)
-    print(f'  [save] {p1.name}')
-    p2 = phot_dir / f'diag2_phot_compare_{args.tile}.png'
-    plot2_compare(stars, n1, bands, p2, args.tile)
-    print(f'  [save] {p2.name}')
-    p3 = phot_dir / f'diag3_psf_composite_{args.tile}.png'
-    p4 = phot_dir / f'diag4_psf_profile_{args.tile}.png'
+    for b in bands:
+        mag_b = clean_mag(stars[f'{b}_MAG_PSF'])
+        p1 = phot_dir / f'diag1_stars_radec_{args.tile}_{b}.png'
+        plot1_radec(stars, n1, mag_b, outline, p1, args.tile, b)
+        p2 = phot_dir / f'diag2_phot_compare_{args.tile}_{b}.png'
+        plot2_compare(stars, n1, [b], p2, args.tile)
+    print(f'  [save] diag1/diag2 per band ({len(bands)} each)')
     used = plots34_psf(stars, n1, bands, args.mission, args.tile, spec,
-                       p3, p4)
-    print(f'  [save] {p3.name}  {p4.name}  (stamps used: {used})')
+                       phot_dir)
+    print(f'  [save] diag3/diag4 per band + overlay (stamps: {used})')
     print(f'=== diag {args.mission}/{args.tile} done '
           f'({time.time()-t0:.0f}s) ===')
 

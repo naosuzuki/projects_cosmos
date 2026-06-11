@@ -115,12 +115,33 @@ def band_measurement(mission: str, tile: str, band: str):
 
 
 def band_meta(mission: str, tile: str, band: str) -> dict:
+    """3a-① meta for (tile, band).  If the tile has no model (the ~40
+    sparse-NISP Euclid tiles), borrow the numerically nearest tile's
+    meta — NISP FWHM varies only ~1.7% tile-to-tile, and MER ZPs are
+    uniform per band."""
     inst = MISSIONS[mission]['inst'][band]
     p = _meta_path(inst, tile, band)
     try:
         return json.loads(p.read_text())
     except (OSError, json.JSONDecodeError):
+        pass
+    donors = sorted(WORK.glob(f'{inst}/*/psf/psf_*.meta.json'))
+    if not donors:
         return {}
+
+    def _dist(d):
+        try:
+            return abs(int(d.parent.parent.name) - int(tile))
+        except ValueError:
+            return 1 if d.parent.parent.name != tile else 0
+    donor = min(donors, key=_dist)
+    try:
+        m = json.loads(donor.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    print(f'  [borrow] {band}: PSF/ZP from tile '
+          f'{donor.parent.parent.name}', flush=True)
+    return m
 
 
 # ----------------------------------------------------------------------
@@ -307,6 +328,10 @@ def main():
             elif not Path(psf).exists():
                 print(f'  [warn] psf model missing on disk: {psf}')
                 psf = None
+        if not psf:
+            print(f'  [skip] {band}: no PSF model anywhere — band dropped')
+            qa['bands'][band] = dict(used=False, reason='no_psf_model')
+            continue
         binfo = dict(used=True, zp_ab=zp, psf_model=psf,
                      psf_meta_found=bool(bmeta))
 

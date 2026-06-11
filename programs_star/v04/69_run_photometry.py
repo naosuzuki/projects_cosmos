@@ -47,8 +47,10 @@ STAGES = {
                meta='phot/star_{t}.meta.json'),
     '66': dict(script='66_step3a_dao_psf_photometry.py',
                meta='phot/dao_{t}.meta.json'),
+    '70': dict(script='70_step3a_diag_plots.py',
+               meta='phot/diag4_psf_profile_{t}.png'),
 }
-STAGE_ORDER = ['53', '67', '66']
+STAGE_ORDER = ['53', '67', '66', '70']
 
 _lock = threading.Lock()
 
@@ -110,7 +112,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--missions', default='jwst,hst,euclid')
-    p.add_argument('--stages', default='53,67,66',
+    p.add_argument('--stages', default='53,67,66,70',
                    help='comma subset of 53,67,66 (order fixed)')
     p.add_argument('--jobs', type=int, default=None)
     p.add_argument('--tiles', default='')
