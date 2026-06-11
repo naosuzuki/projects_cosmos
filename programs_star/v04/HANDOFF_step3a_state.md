@@ -1,6 +1,24 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
-## ⚡⚡⚡⚡ STATUS 2026-06-11 afternoon — FULL 3a-③+3b+DAO+diag MASS PRODUCTION SELF-DRIVING
+## ⚡⚡⚡⚡⚡ STATUS 2026-06-11 evening shutdown — mass production PAUSED mid-Euclid; plot-revision round pending
+
+The 69_ pass-1 driver and its auto-followup were STOPPED (user) before
+completion.  State on disk (all resumable):
+- HST 19+1/20 COMPLETE (53+67+66); JWST: only A4 complete; Euclid:
+  ~18 tiles complete, 23 pre-borrow-fix failures (will auto-retry),
+  rest not started.  Diag plots (70_) exist only for jwst/A4.
+- TO RESUME EVERYTHING: `cd programs_star/v04 && /opt/miniconda3/bin/python
+  69_run_photometry.py --missions hst,euclid,jwst` then
+  `71_make_diag_site.py`.  Resumable per stage; failed tiles retried
+  automatically (53_ now borrows nearest-tile PSF/ZP for sparse NISP).
+- NEXT (user-driven): a REVISION ROUND on the 70_ plots + 71_ site,
+  piloting on jwst/A4, BEFORE relaunching mass production (so the diag
+  stage runs with final plot code).  User asked how stars are selected
+  for plots (answered: 3b is_star for plots 1-2; + unsaturated, n₁=0,
+  clean stamp for composites 3-4; noted purity-over-completeness bias —
+  a looser sample is a one-line change if requested).
+
+## ⚡⚡⚡⚡ STATUS 2026-06-11 afternoon — FULL 3a-③+3b+DAO+diag MASS PRODUCTION SELF-DRIVING (superseded — driver stopped)
 
 **A4 patch complete end-to-end** (jwst/A4 + hst/A4 + euclid
 101541375/101542818/101542817): detection → 53_ PSF photometry →
