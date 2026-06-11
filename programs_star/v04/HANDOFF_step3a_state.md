@@ -39,10 +39,35 @@ imaging (HST onset 19.0 → 4 usable stars).  HST A4: 30 training stars,
 4 envelopes, 617 band votes, is_star=81 (Gaia-PM; 1-band tiles can't
 reach 3 votes until the cross-mission union).
 
-**In flight when this was written:** 53_ on jwst/A4 and euclid/101541375
-(then 67_ on both — euclid 4 bands = first real ≥3-vote aggregate test).
-**Next:** profile/speed DAO → photometry mass run over 96 tiles → 67_
-everywhere → 66_ DAO pool photometry → cross-mission union (Step 5 prep).
+**2026-06-11 08:25 wrap-up (computer shutdown).  ALL PILOTS DONE:**
+- 53_ speed SOLVED: SPREAD_MODEL was 170× the whole pass cost
+  (benchmark 404.6 s vs 2.4 s on 4.2 Mpx) → new configs/pass2_psf.param
+  without it; 68_make_phot_psf.py wrote 6×FWHM _phot.psf crops (1958).
+  Euclid 4-band tile now 655 s; JWST A4 (280k rows × 8 passes) ~35 min.
+- phot pilots complete: hst/A4 (11,938×51, Gaia G−F814W −0.18±0.54),
+  euclid/101541375 (46,747×103), jwst/A4 (53,703 rows, 4 bands).
+- 67_ 3b pilots: euclid/101541375 → is_star 421 (320 by ≥3 votes,
+  187 Gaia-PM, ~5.2k/deg² PLAUSIBLE); hst/A4 → 81 (Gaia-PM only,
+  1 band).  ⚠ KNOWN ISSUE: jwst/A4 → 18,846 "stars" (35%!) — faint
+  sources with NaN DAO stats pass the flat-extrapolated envelopes
+  trivially (my rule: non-finite stat doesn't fail the band; JWST DAO
+  match is shallow vs the spine).  FIX NEXT SESSION in 67_: require
+  ≥2 finite stats (incl. ≥1 DAO) for a band vote AND don't extrapolate
+  envelopes fainter than the training range + ~1 mag (set vote=False
+  beyond).  Euclid was less affected (deeper DAO match fraction).
+
+**Next session worklist:**
+1. Fix 67_ vote rule (above), re-check jwst/A4 (expect few hundred to
+   ~2k stars incl. faint-compact, NOT 18k) and euclid/101541375.
+2. Write 69_run_photometry.py mass driver (mirror 65_; jwst 2-way,
+   hst 3-way, euclid 4-way; ~3-4 h for all 96 tiles) → run 53_ + 67_
+   everywhere.
+3. 66_ DAO pool PSF-fitting photometry (GriddedPSFModel from the
+   PSFEx .psf, ALLSTAR-style grouping) → psf_phot_consistent.
+4. ms.tex §B.1 amendments: chi+ sqrt + per-pixel N + signed single-band
+   eq.; hot-thresh calibration by negative-image QA; 3b G window 14–21.
+5. QA pages for detection+phot (counts, negqa, envelope PNGs are in
+   <mission>_chi2/<tile>/phot/star_envelopes_<tile>.png).
 
 ## ⚡⚡ STATUS 2026-06-10 evening — Step 3a-② detection REWRITTEN, A4-validated, mass run PENDING
 
