@@ -105,6 +105,7 @@ def pooled_onset(band, min_cells, jobs=4, verbose=True):
     with ThreadPoolExecutor(max_workers=jobs) as ex:
         pre = list(ex.map(lambda c: (c, *ensure_pass1(c, band)), todo))
     GG, PP, MM = [], [], []
+    frames = []
     used = 0
     for c, cat, _ in pre:
         if cat is None:
@@ -114,6 +115,7 @@ def pooled_onset(band, min_cells, jobs=4, verbose=True):
             img = cell_paths(c, band)
             with fits.open(img) as h:
                 sci = h[0].data.astype(np.float32)
+                nmgy = float(h[0].header.get('NMGY', np.nan))
             sci[~np.isfinite(sci)] = 0.0
         except Exception:
             continue
@@ -127,6 +129,8 @@ def pooled_onset(band, min_cells, jobs=4, verbose=True):
         pk = core_peak(sci, xx, yy, half=2, idx=np.where(sel)[0])
         ok = sel & (pk > 0)
         GG.append(G[idx[ok]]); PP.append(np.log10(pk[ok])); MM.append(mau[ok])
+        frames.append({'cell': c, 'nmgy': nmgy,
+                       'mag': mau[ok], 'logpk': np.log10(pk[ok])})
         used += 1
     GG = np.concatenate(GG); PP = np.concatenate(PP); MM = np.concatenate(MM)
 
@@ -151,23 +155,49 @@ def pooled_onset(band, min_cells, jobs=4, verbose=True):
         return None, used, len(GG)
     un = (GG > onset_G + 1.0) & (GG < onset_G + 3.0) & np.isfinite(MM)
     color = float(np.median(MM[un] - GG[un]))
-    sat = (GG < onset_G) & np.isfinite(MM)
-    slide = (float(np.percentile(MM[sat] - GG[sat] - color, 95))
-             if sat.sum() >= 5 else 0.3)
-    veto = onset_G + color + max(slide, 0.0)
+    # NO slide margin for SDSS — selecting "saturated" stars by G<G_onset
+    # conflates saturation displacement with INTRINSIC COLOR SPREAD: a red
+    # giant at G=13 has g~15.5 (far below g saturation) yet its large g-G
+    # reads as a fake 2-mag "slide" (median slide ~1.5-2 in g/r = colors, not
+    # physics).  Slid saturated stars are rejected by the FLUX_RADIUS-bloat /
+    # shape cuts anyway.  User-validated on the saturation plots: the unslid
+    # onsets match the eyeball (~14 g/r/i, ~12 z); the slid 16.3-16.8 do not.
+    slide = 0.0
+    veto = onset_G + color + slide
+    # ── camera full-well K_DN (counts) for the PER-TILE onset ──────────────
+    # Saturation in COUNTS is the camera constant; the calibrated ceiling
+    # varies per frame as C = K_DN * NMGY (header counts->nMgy scale), and the
+    # onset magnitude additionally varies with seeing through each frame's own
+    # peak-mag relation.  Calibrate K_DN once per band: for each pooled frame,
+    # fit a robust log10(peak)-vs-mag line on unsaturated stars and evaluate
+    # it at the GLOBAL onset -> that frame's implied ceiling; K = median(C/NMGY).
+    Ks = []
+    for fr in frames:
+        m_, p_ = fr['mag'], fr['logpk']
+        fitm = (m_ > veto + 0.5) & (m_ < veto + 4.0) & np.isfinite(m_) & np.isfinite(p_)
+        if fitm.sum() < 12 or not np.isfinite(fr['nmgy']):
+            continue
+        bline = np.polyfit(m_[fitm], p_[fitm], 1)
+        if not (-0.65 <= bline[0] <= -0.25):
+            continue
+        C_frame = 10.0 ** np.polyval(bline, veto)
+        Ks.append(C_frame / fr['nmgy'])
+    K_dn = float(np.median(Ks)) if len(Ks) >= 8 else None
     if verbose:
         print(f'  {band}: {used} cells, {len(GG)} Gaia stars; ref step {ref:+.3f}; '
               f'G_onset={onset_G:.2f} color={color:+.2f} slide_p95={slide:.2f} '
-              f'-> VETO onset {veto:.2f}')
+              f'-> VETO onset {veto:.2f}  K_DN={K_dn if K_dn is None else round(K_dn):} ({len(Ks)} frames)')
     return ({'sat_onset_mag': round(veto, 2), 'gaia_G_onset': onset_G,
-             'color_band_minus_G': round(color, 3), 'slide_p95': round(slide, 3)},
+             'color_band_minus_G': round(color, 3), 'slide_p95': round(slide, 3),
+             'fullwell_K_dn': (None if K_dn is None else round(K_dn, 1)),
+             'n_frames_K': len(Ks)},
             used, len(GG))
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--bands', default='u,g,r,i,z')
-    ap.add_argument('--min-cells', type=int, default=24)
+    ap.add_argument('--min-cells', type=int, default=48)
     ap.add_argument('--jobs', type=int, default=4)
     a = ap.parse_args()
     res = {}

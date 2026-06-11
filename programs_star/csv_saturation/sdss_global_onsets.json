@@ -1,43 +1,51 @@
 {
-  "created_utc_iso": "2026-06-11T00:35:57Z",
+  "created_utc_iso": "2026-06-11T02:29:32Z",
   "method": "pooled Gaia-anchored peak turnover (G axis) + band-G color + p95 saturated-star MAG_AUTO slide margin (= LS method)",
   "bands": {
     "u": {
       "sat_onset_mag": null,
-      "n_cells_pooled": 24,
-      "n_gaia_pooled": 1502
+      "n_cells_pooled": 48,
+      "n_gaia_pooled": 3031
     },
     "g": {
-      "sat_onset_mag": 16.53,
+      "sat_onset_mag": 14.33,
       "gaia_G_onset": 13.75,
-      "color_band_minus_G": 0.564,
-      "slide_p95": 2.213,
-      "n_cells_pooled": 24,
-      "n_gaia_pooled": 3225
+      "color_band_minus_G": 0.581,
+      "slide_p95": 0.0,
+      "fullwell_K_dn": 37068.0,
+      "n_frames_K": 48,
+      "n_cells_pooled": 48,
+      "n_gaia_pooled": 6440
     },
     "r": {
-      "sat_onset_mag": 16.8,
+      "sat_onset_mag": 14.27,
       "gaia_G_onset": 14.25,
       "color_band_minus_G": 0.016,
-      "slide_p95": 2.53,
-      "n_cells_pooled": 24,
-      "n_gaia_pooled": 3380
+      "slide_p95": 0.0,
+      "fullwell_K_dn": 28072.3,
+      "n_frames_K": 48,
+      "n_cells_pooled": 48,
+      "n_gaia_pooled": 6776
     },
     "i": {
-      "sat_onset_mag": 16.34,
+      "sat_onset_mag": 14.03,
       "gaia_G_onset": 14.25,
-      "color_band_minus_G": -0.212,
-      "slide_p95": 2.302,
-      "n_cells_pooled": 24,
-      "n_gaia_pooled": 3377
+      "color_band_minus_G": -0.216,
+      "slide_p95": 0.0,
+      "fullwell_K_dn": 28305.8,
+      "n_frames_K": 48,
+      "n_cells_pooled": 48,
+      "n_gaia_pooled": 6769
     },
     "z": {
-      "sat_onset_mag": 14.24,
+      "sat_onset_mag": 12.05,
       "gaia_G_onset": 12.25,
-      "color_band_minus_G": -0.212,
-      "slide_p95": 2.2,
-      "n_cells_pooled": 24,
-      "n_gaia_pooled": 3200
+      "color_band_minus_G": -0.197,
+      "slide_p95": 0.0,
+      "fullwell_K_dn": 39965.3,
+      "n_frames_K": 47,
+      "n_cells_pooled": 48,
+      "n_gaia_pooled": 6419
     }
   }
 }
