@@ -1,5 +1,41 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
+## ⚡⚡⚡⚡ STATUS 2026-06-11 afternoon — FULL 3a-③+3b+DAO+diag MASS PRODUCTION SELF-DRIVING
+
+**A4 patch complete end-to-end** (jwst/A4 + hst/A4 + euclid
+101541375/101542818/101542817): detection → 53_ PSF photometry →
+67_ 3b stars (358/81/285/293/320 — stable) → 66_ DAO pool photometry
+(SEx−DAO scatter 0.06–0.11 mag, per-band wing-truncation offsets in
+meta, psf_phot_consistent ~70%) → 70_ per-filter diag plots.
+
+**Chain 53→67→66→70 via 69_run_photometry.py over all 96 tiles is
+RUNNING with an auto-followup** (background job): when pass 1 ends, a
+completion sweep retries the 23 pre-fix sparse-NISP Euclid failures
+(53_ band_meta now BORROWS nearest tile's PSF/ZP) + fills diag plots
+everywhere, then 71_make_diag_site.py refreshes html/diag_qa/ and a
+final per-mission tally prints.  HST 19/19 already complete.
+
+**New scripts this session:** 66_ (photutils PSFPhotometry, GriddedPSFModel
+from PSFEx poly, stamps normalized to over²; pool = Gaia ∪ tilted-locus
+∪ DAO vetoes), 69_ (4-stage driver + phot_timing.csv), 70_ (per-filter:
+RA/Dec star map, APER−PSF/DAO compare, ×9-drizzle composite PSF sqrt
+stretch ±1.2″, profile cuts), 71_ (diag QA site in psf_qa layout).
+67_ vote-rule fix: band vote needs ≥2 finite stats (≥1 DAO) + mag within
+training range +1 (jwst/A4 18,846 → 358).
+
+**Edge objects:** tiles overlap (Euclid ~2′, COSMOS-Web less); plan =
+dedup by edge distance at the cross-tile union using the Step-1
+products (csvfiles_star/v04/tile_lookup.parquet + coverage masks +
+common_area_*WKT/geojson) — NO pixel stitching unless footprints show
+true seams.  User question answered 2026-06-11.
+
+**Next after mass production:** verify final tally (expect ~96 tiles ×
+4 stages, ~25–30k stars total), spot-check diag site, commit timing
+CSVs, then Step 4 (per-filter empirical saturation calibration) and
+Step 5 (PM four pairs) per ms.tex; ms.tex §B.1 amendments still owed
+(chi+ sqrt eq., per-pixel N, signed single-band, hot-thresh negqa,
+3b G window 14–21).
+
 ## ⚡ STATUS 2026-06-11 — 3a-① unWISE COMPLETE (10/10): all ground+space surveys now have PSF models
 
 **unWISE neo7 W1/W2 (data-collection session): DONE.**  5 COSMOS tiles ×
