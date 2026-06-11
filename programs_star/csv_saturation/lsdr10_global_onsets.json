@@ -1,34 +1,46 @@
 {
-  "created_utc_iso": "2026-06-10T19:19:25Z",
-  "method": "pooled Gaia-anchored peak turnover (G axis, immune to MAG_AUTO slide) + band-G color + p95 saturated-star MAG_AUTO slide margin",
+  "created_utc_iso": "2026-06-11T06:21:16Z",
+  "method": "pooled Gaia-anchored peak turnover (G axis, immune to the MAG_AUTO slide of saturated stars) + band-G color + p95 saturated-star slide margin",
   "bands": {
     "g": {
-      "sat_onset_mag": 17.12,
-      "gaia_G_onset": 15.25,
-      "color_band_minus_G": 0.825,
-      "slide_p95": 1.047,
-      "n_gaia_pooled": 3117
+      "sat_onset_mag": 16.59,
+      "gaia_G_onset": 14.75,
+      "color_band_minus_G": 0.713,
+      "slide_p95": 1.131,
+      "ceiling_K_nmgy": 8.34,
+      "n_frames_K": 12,
+      "n_bricks_pooled": 12,
+      "n_gaia_pooled": 3147
     },
     "r": {
-      "sat_onset_mag": 16.75,
+      "sat_onset_mag": 16.78,
       "gaia_G_onset": 15.25,
       "color_band_minus_G": 0.013,
-      "slide_p95": 1.489,
-      "n_gaia_pooled": 3122
+      "slide_p95": 1.512,
+      "ceiling_K_nmgy": 6.56,
+      "n_frames_K": 12,
+      "n_bricks_pooled": 12,
+      "n_gaia_pooled": 3123
     },
     "i": {
-      "sat_onset_mag": 17.65,
-      "gaia_G_onset": 16.75,
-      "color_band_minus_G": -0.597,
-      "slide_p95": 1.492,
-      "n_gaia_pooled": 3118
+      "sat_onset_mag": 16.77,
+      "gaia_G_onset": 15.75,
+      "color_band_minus_G": -0.449,
+      "slide_p95": 1.471,
+      "ceiling_K_nmgy": 7.62,
+      "n_frames_K": 12,
+      "n_bricks_pooled": 12,
+      "n_gaia_pooled": 3150
     },
     "z": {
-      "sat_onset_mag": 15.94,
-      "gaia_G_onset": 14.75,
-      "color_band_minus_G": -0.374,
-      "slide_p95": 1.561,
-      "n_gaia_pooled": 3144
+      "sat_onset_mag": 16.39,
+      "gaia_G_onset": 15.25,
+      "color_band_minus_G": -0.513,
+      "slide_p95": 1.65,
+      "ceiling_K_nmgy": 8.71,
+      "n_frames_K": 12,
+      "n_bricks_pooled": 12,
+      "n_gaia_pooled": 3135
     }
   }
 }

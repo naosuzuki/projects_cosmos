@@ -100,6 +100,7 @@ def pooled_onset(band, min_bricks, verbose=True):
             if b not in have]
     todo = have + want[:max(0, min_bricks - len(have))]
     GG, PP, MM = [], [], []
+    frames = []
     used = 0
     for b in todo:
         cat = ensure_pass1(b, band)
@@ -121,6 +122,7 @@ def pooled_onset(band, min_bricks, verbose=True):
         pk = core_peak(sci, xx, yy, half=2, idx=np.where(sel)[0])
         ok = sel & (pk > 0)
         GG.append(G[idx[ok]]); PP.append(np.log10(pk[ok])); MM.append(mau[ok])
+        frames.append({'mag': mau[ok], 'logpk': np.log10(pk[ok])})
         used += 1
     GG = np.concatenate(GG); PP = np.concatenate(PP); MM = np.concatenate(MM)
 
@@ -149,12 +151,29 @@ def pooled_onset(band, min_bricks, verbose=True):
     slide = (float(np.percentile(MM[sat] - GG[sat] - color, 95))
              if sat.sum() >= 5 else 0.3)
     veto = onset_G + color + max(slide, 0.0)
+    # ceiling constant K (nMgy) for the PER-BRICK onset: median over pooled
+    # bricks of each brick's own robust peak-mag line evaluated at the global
+    # onset.  (LS images are CALIBRATED nMgy with no per-brick scale keyword,
+    # so K is one number per band; per-brick onset variation then enters
+    # through each brick's own line = its seeing.)
+    Ks = []
+    for fr in frames:
+        m_, p_ = fr['mag'], fr['logpk']
+        fitm = (m_ > veto + 0.5) & (m_ < veto + 4.0) & np.isfinite(m_) & np.isfinite(p_)
+        if fitm.sum() < 12:
+            continue
+        bline = np.polyfit(m_[fitm], p_[fitm], 1)
+        if -0.65 <= bline[0] <= -0.25:
+            Ks.append(10.0 ** np.polyval(bline, veto))
+    K_nmgy = float(np.median(Ks)) if len(Ks) >= 8 else None
     if verbose:
         print(f'  {band}: {used} bricks, {len(GG)} Gaia stars; ref step {ref:+.3f}; '
               f'G_onset={onset_G:.2f} color={color:+.2f} slide_p95={slide:.2f} '
               f'-> VETO onset {veto:.2f}')
     return ({'sat_onset_mag': round(veto, 2), 'gaia_G_onset': onset_G,
-             'color_band_minus_G': round(color, 3), 'slide_p95': round(slide, 3)},
+             'color_band_minus_G': round(color, 3), 'slide_p95': round(slide, 3),
+             'ceiling_K_nmgy': (None if K_nmgy is None else round(K_nmgy, 2)),
+             'n_frames_K': len(Ks)},
             used, len(GG))
 
 

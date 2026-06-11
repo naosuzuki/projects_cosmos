@@ -177,19 +177,37 @@ def main():
         box = mask[yi[k]-half:yi[k]+half+1, xi[k]-half:xi[k]+half+1]
         satcore[k] = int(np.sum((box & core_reject) != 0))
     is_pt = (cs > 0.8) & (snr > a.snr_min)
-    # GLOBAL per-band onset (pooled, Gaia-anchored — ps1_global_onsets.json,
-    # measured by the 64_-style pooled script before mass production); local
-    # turnover fallback for the pilot.  Per-source SAT-bit veto always on.
+    peak = core_peak(sci, xx, yy, half=half, idx=np.where(is_pt)[0])
     sat_peak_level, peak_saturated = np.inf, np.zeros(len(obj), bool)
     onset_mag, sat_onset_method = None, None
+    # ── PER-TILE saturation (user: "saturation can vary tile by tile") ──────
+    # PS1 carries the SAT maskbit, so each cell's ceiling is measured
+    # DIRECTLY: the peaks of SAT-core-flagged point sources cluster at the
+    # local ceiling; onset = where the cell's OWN peak-mag relation crosses
+    # it (varies with the cell's seeing + exposure depth).  Clamped to the
+    # pooled Gaia-anchored global +-1 mag; falls back to global -> turnover.
     gj = PROJECT / 'programs_star' / 'csv_saturation' / 'ps1_global_onsets.json'
-    if gj.exists():
-        gv = json.loads(gj.read_text()).get('bands', {}).get(band, {})
-        if gv.get('sat_onset_mag') is not None:
-            onset_mag = float(gv['sat_onset_mag'])
-            sat_onset_method = 'global_pooled'
+    gv = (json.loads(gj.read_text()).get('bands', {}).get(band, {})
+          if gj.exists() else {})
+    onset_glob = gv.get('sat_onset_mag')
+    if onset_glob is not None:
+        satpk = peak[(satcore > 0) & is_pt & (peak > 0)]
+        fitm = (is_pt & np.isfinite(mag) & (peak > 0) & (satcore == 0)
+                & (mag > onset_glob + 0.5) & (mag < onset_glob + 4.0))
+        if len(satpk) >= 3 and fitm.sum() >= 12:
+            C_tile = float(np.percentile(satpk, 75))
+            bline = np.polyfit(mag[fitm], np.log10(peak[fitm]), 1)
+            if -0.65 <= bline[0] <= -0.25 and C_tile > 0:
+                onset_mag = float((np.log10(C_tile) - bline[1]) / bline[0])
+                onset_mag = float(np.clip(onset_mag, onset_glob - 1.0,
+                                          onset_glob + 1.0))
+                sat_onset_method = 'per_tile_ceiling'
+                sat_peak_level = C_tile
+                peak_saturated = np.isfinite(peak) & (peak >= C_tile)
+    if onset_mag is None and onset_glob is not None:
+        onset_mag = float(onset_glob)
+        sat_onset_method = 'global_pooled'
     if onset_mag is None:
-        peak = core_peak(sci, xx, yy, half=half, idx=np.where(is_pt)[0])
         sat_peak_level, onset_mag = detect_saturation_turnover(mag, peak, is_pt)
         if onset_mag is not None:
             sat_onset_method = 'turnover_local'
@@ -199,7 +217,9 @@ def main():
         saturated = saturated | (np.isfinite(mag) & (mag < onset_mag))
     print(f'  saturation : {int(saturated.sum())} excluded  '
           f'(onset = {onset_mag if onset_mag is None else round(onset_mag,2)} '
-          f'[{sat_onset_method}]; SAT-bit cores {int((satcore>0).sum())})')
+          f'[{sat_onset_method}]; SAT-bit cores {int((satcore>0).sum())}'
+          + (f'; ceiling {sat_peak_level:.3g}' if np.isfinite(sat_peak_level) else '')
+          + ')')
 
     # ── Gaia-DR3-anchored stellar locus ──
     gaia_star = gaia_star_mask(xx, yy, imhdr, radius_arcsec=0.6)

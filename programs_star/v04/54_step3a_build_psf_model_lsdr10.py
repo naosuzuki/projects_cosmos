@@ -182,21 +182,41 @@ def main():
         box = mask[yi[k]-half:yi[k]+half+1, xi[k]-half:xi[k]+half+1]
         satcore[k] = int(np.sum((box & core_reject) != 0))
     is_pt = (cs > 0.8) & (snr > a.snr_min)
-    # GLOBAL per-band onset (64_step3a_lsdr10_global_saturation.py): DECam
-    # saturation is a (camera, band) property — same full well + ~uniform
-    # survey exposures everywhere — so the onset is measured ONCE per band by
-    # pooling bright stars across bricks (per-brick estimates fail: 1-6 stars
-    # per 0.5-mag bin).  The per-source SATUR-core veto handles local bleeds.
+    peak = core_peak(sci, xx, yy, half=half, idx=np.where(is_pt)[0])
     sat_peak_level, peak_saturated = np.inf, np.zeros(len(obj), bool)
     onset_mag, sat_onset_method = None, None
+    # ── PER-TILE saturation (user: "saturation can vary tile by tile") ──────
+    # The SATUR maskbit gives each brick's ceiling DIRECTLY: peaks of
+    # SATUR-core-flagged point sources cluster at the local ceiling; onset =
+    # where the brick's OWN peak-mag relation crosses it (adapts to the
+    # brick's seeing + depth).  Clamped to the pooled Gaia-anchored global
+    # +-1 mag; falls back to global -> local turnover -> locus departure.
     gj = PROJECT / 'programs_star' / 'csv_saturation' / 'lsdr10_global_onsets.json'
-    if gj.exists():
-        gv = json.loads(gj.read_text()).get('bands', {}).get(band, {})
-        if gv.get('sat_onset_mag') is not None:
-            onset_mag = float(gv['sat_onset_mag'])
-            sat_onset_method = 'global_pooled'
+    gv = (json.loads(gj.read_text()).get('bands', {}).get(band, {})
+          if gj.exists() else {})
+    onset_glob = gv.get('sat_onset_mag')
+    K_nmgy = gv.get('ceiling_K_nmgy')
+    if onset_glob is not None and K_nmgy is not None:
+        # NOT the SAT-flagged-peak ceiling: DECam interpolates saturated cores,
+        # biasing recorded peaks low -> onset too bright.  Use the band's
+        # global ceiling constant (64_) crossed with THIS brick's own line —
+        # per-brick variation enters through the line (= the brick's seeing).
+        fitm = (is_pt & np.isfinite(mag) & (peak > 0) & (satcore == 0)
+                & (mag > onset_glob + 0.5) & (mag < onset_glob + 4.0))
+        if fitm.sum() >= 12:
+            C_tile = float(K_nmgy)
+            bline = np.polyfit(mag[fitm], np.log10(peak[fitm]), 1)
+            if -0.65 <= bline[0] <= -0.25 and C_tile > 0:
+                onset_mag = float((np.log10(C_tile) - bline[1]) / bline[0])
+                onset_mag = float(np.clip(onset_mag, onset_glob - 1.0,
+                                          onset_glob + 1.0))
+                sat_onset_method = 'per_tile_ceiling'
+                sat_peak_level = C_tile
+                peak_saturated = np.isfinite(peak) & (peak >= C_tile)
+    if onset_mag is None and onset_glob is not None:
+        onset_mag = float(onset_glob)
+        sat_onset_method = 'global_pooled'
     if onset_mag is None:                          # fallback: this brick alone
-        peak = core_peak(sci, xx, yy, half=half, idx=np.where(is_pt)[0])
         sat_peak_level, onset_mag = detect_saturation_turnover(mag, peak, is_pt)
         if onset_mag is not None:
             sat_onset_method = 'turnover_local'
@@ -206,7 +226,9 @@ def main():
         saturated = saturated | (np.isfinite(mag) & (mag < onset_mag))
     print(f'  saturation : {int(saturated.sum())} excluded  '
           f'(onset = {onset_mag if onset_mag is None else round(onset_mag,2)} '
-          f'[{sat_onset_method}]; core-bits {int((satcore>0).sum())})')
+          f'[{sat_onset_method}]; core-bits {int((satcore>0).sum())}'
+          + (f'; ceiling {sat_peak_level:.3g}' if np.isfinite(sat_peak_level) else '')
+          + ')')
 
     # ── Gaia-DR3-anchored stellar locus (immune to compact-galaxy bias) ──
     gaia_star = gaia_star_mask(xx, yy, imhdr, radius_arcsec=0.6)
