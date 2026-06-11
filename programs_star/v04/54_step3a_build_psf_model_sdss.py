@@ -325,6 +325,19 @@ def main():
         star = ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
                 & keep_fr & e_round
                 & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
+    if int(star.sum()) < 10 and tilted:
+        print(f'  [guard] tilted band leaves only {int(star.sum())} stars — '
+              f'reverting to the CONSTANT locus band (runaway tilt fit)')
+        tilted = False
+        slope, icpt, mad_t = 0.0, med, mad
+        locus_of = lambda mm: np.full_like(np.asarray(mm, float), med)
+        cut_arr   = np.full(len(obj), med - 3.0 * mad)
+        upper_arr = np.where(np.isfinite(mag) & (mag < bright_pivot),
+                             med + 6.0 * mad, med + 3.0 * mad)
+        keep_fr   = (fr > cut_arr) & (fr < upper_arr)
+        star = ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
+                & keep_fr & e_round & pure_arr
+                & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
     print(f'  PSF stars selected : {star.sum()}   '
           f'(saturated excl {saturated.sum()}, '
           f'isolation (any nbr <{a.nbr_fwhm:.1f}xFWHM={R_nbr*PIXSCALE:.2f}\") '

@@ -347,6 +347,32 @@ def main():
     star = ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
             & keep_fr & e_round & pure_arr
             & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
+    # self-consistency guards (ported from the SDSS builder):
+    # (a) a purity limit that EMPTIES the sample is a probe-bin fluke — drop it;
+    # (b) if the TILTED band still leaves <10 stars, the tilt fit ran away
+    #     (slope pinned at the clamp swings the rails off the locus) — revert
+    #     to the CONSTANT locus band.
+    def _select(_keep_fr, _pure):
+        return ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
+                & _keep_fr & e_round & _pure
+                & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
+    if pure_to is not None and int(star.sum()) < 10:
+        print(f'  [guard] purity {pure_to:.1f} leaves only {int(star.sum())} '
+              f'stars — dropping the purity cut (probe-bin fluke)')
+        pure_to = None
+        pure_arr = np.ones(len(obj), bool)
+        star = _select(keep_fr, pure_arr)
+    if int(star.sum()) < 10 and tilted:
+        print(f'  [guard] tilted band leaves only {int(star.sum())} stars — '
+              f'reverting to the CONSTANT locus band (runaway tilt fit)')
+        tilted = False
+        slope, icpt, mad_t = 0.0, med, mad
+        locus_of = lambda mm: np.full_like(np.asarray(mm, float), med)
+        cut_arr   = np.full(len(obj), med - 3.0 * mad)
+        upper_arr = np.where(np.isfinite(mag) & (mag < bright_pivot),
+                             med + 6.0 * mad, med + 3.0 * mad)
+        keep_fr   = (fr > cut_arr) & (fr < upper_arr)
+        star = _select(keep_fr, pure_arr)
     print(f'  PSF stars selected : {star.sum()}   '
           f'(saturated/bad excl {saturated.sum()}, gap {gap_masked.sum()}, '
           f'isolation (any nbr <{a.nbr_fwhm:.1f}xFWHM={R_nbr*PIXSCALE:.2f}\") '
