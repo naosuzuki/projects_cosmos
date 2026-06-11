@@ -205,7 +205,8 @@ def main():
         binfo = dict(n_train=int(train.sum()))
         stat_envs = {}
         inside_all = np.ones(len(t), dtype=bool)
-        usable = np.isfinite(mag)
+        n_finite = np.zeros(len(t), dtype=np.int16)
+        n_finite_dao = np.zeros(len(t), dtype=np.int16)
         n_stats_used = 0
         for stat, two in STATS:
             col = f'{b}_{stat}'
@@ -221,12 +222,26 @@ def main():
             finite = np.isfinite(val)
             inside = np.zeros(len(t), dtype=bool)
             inside[finite] = eval_envelope(env, mag[finite], val[finite])
-            # sources with a non-finite stat don't fail the band on it,
-            # but must pass at least one finite stat (tracked via usable)
             inside_all &= inside | ~finite
-            usable &= True
-        band_vote = inside_all & usable & np.isfinite(mag) & \
-            (n_stats_used > 0)
+            n_finite += finite.astype(np.int16)
+            if stat.startswith('DAO'):
+                n_finite_dao += finite.astype(np.int16)
+        # A band vote requires (fix 2026-06-11, after jwst/A4 returned
+        # 35% "stars"): a source must be MEASURED to vote —
+        #   (a) >=2 finite stats inside envelopes, >=1 of them DAO
+        #       (faint sources below the DAO 4σ depth have all-NaN DAO
+        #       stats and were passing on CHI2_PSF alone), and
+        #   (b) MAG_PSF no fainter than the training range + 1 mag
+        #       (envelopes are NOT extrapolated into the regime where
+        #       the training set has no stars).
+        tr_mags = mag[train]
+        tmax = (float(np.nanmax(tr_mags)) if np.isfinite(tr_mags).any()
+                else -np.inf)
+        binfo['train_mag_max'] = (round(tmax, 2)
+                                  if np.isfinite(tmax) else None)
+        band_vote = (inside_all & (n_finite >= 2) & (n_finite_dao >= 1) &
+                     np.isfinite(mag) & (mag <= tmax + 1.0) &
+                     (n_stats_used > 0))
         t[f'is_star_psf_{b}'] = band_vote
         votable = ~sat & np.isfinite(mag) & (n_stats_used > 0)
         votes += (band_vote & votable).astype(np.int16)
