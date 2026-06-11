@@ -1,4 +1,7 @@
-# SExtractor config — JWST NIRCam χ² detection image, HOT pass.
+# SExtractor config — mission-generic χ²₊ detection image, HOT pass.
+# (Used for JWST 4-band, Euclid VIS+NISP, and HST F814W N=1 stacks;
+# PIXEL_SCALE / SEEING_FWHM / file names overridden on the command line
+# by 51_step3a_chi2_detect.py.)
 #
 # Adopts Shuntov+ 2025 (COSMOS2025 / COSMOS-Web galaxy catalog,
 # A&A 2025) parameters where specified, with CANDELS Galametz+ 2013
@@ -11,7 +14,7 @@
 
 #-------------------------------- Catalog ------------------------------------
 CATALOG_TYPE     FITS_LDAC
-PARAMETERS_NAME  default_pass1.param
+PARAMETERS_NAME  chi2_detect.param      # detection columns + KRON_RADIUS
 
 #------------------------------- Extraction ----------------------------------
 DETECT_TYPE      CCD

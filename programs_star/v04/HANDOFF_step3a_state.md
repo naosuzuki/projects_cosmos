@@ -1,5 +1,51 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
+## ⚡⚡ STATUS 2026-06-10 evening — Step 3a-② detection REWRITTEN, A4-validated, mass run PENDING
+
+**51_step3a_chi2_detect.py is now mission-generic** (jwst / hst / euclid;
+empirical FWHMs from the 3a-① metas; real KRON_RADIUS in the merge via new
+`configs/chi2_detect.param`; configs renamed `chi2_cold.sex`/`chi2_hot.sex`).
+Driver: `65_run_chi2_detection.py` (resumable, timing CSV
+`csv_timing/chi2_timing.csv`).
+
+**Two validated recipe changes (evidence in 51_ docstring + this session):**
+1. **Detection image is χ₊ = sqrt(Σ/N), NOT the squared χ²₊** of ms.tex
+   eq. (chi2plus).  On the squared image SExtractor's background-RMS mesh
+   is unstable: a 15% kernel change (pilot guessed FWHMs → empirical)
+   swung A4 cold counts 10,913 → 2,163 on pixel-identical bright sources
+   (RMS-map p99 107 → 242).  The sqrt form = what SWarp CHI2 (Szalay+99)
+   actually produces, i.e. what Shuntov/Galametz really ran on; same
+   kernel change then moves counts only 2.5%.  **ms.tex §B.1 eq. needs
+   the sqrt added** (not yet edited).
+2. **Hot pass at the locked 3.0σ/MINAREA 8 is spurious-dominated** on our
+   homogenization-correlated noise: negative-image test on A4 found MORE
+   detections on pure noise (2,291) than on sky (1,649); cold is pure (0).
+   Threshold sweep → JWST hot_thresh=5.0 (5.6% spurious).  Per-mission
+   `hot_thresh` lives in 51_'s MISSIONS dict; HST/Euclid = None (3.0)
+   UNTIL calibrated from their first tile's negqa.  Negative-image QA is
+   built into 51_ (recipe_version=2): per tile, central 8192² window,
+   pos/neg counts + spurious_frac in the chi2 meta.
+
+**A4 state on disk:** ran with sqrt form recipe v1 (pre-negqa, hot 3.0σ):
+cold 42,446 / hot kept 236,910 / merged 279,356.  Will auto-rebuild under
+recipe v2 (meta mismatch) on the next run.  Old pilot outputs moved to
+`jwst_chi2/pilot_legacy/`; `jwst_chi2/A4full/` kept for the squared-form
+comparison record.
+
+**Resume worklist (in order):**
+1. `python -m py_compile 51_… 65_…` (compile check not yet run after the
+   negqa edits), then `51_ --mission jwst --tile A4 --force` → confirm
+   negqa numbers ≈ the manual cutout test (cold pure; hot ~5% spurious).
+2. One HST tile + one Euclid tile → read negqa from chi2 meta → set
+   hot_thresh for hst/euclid in MISSIONS → rerun those tiles --force.
+3. Mass run: `65_run_chi2_detection.py` (jwst 2-way, hst 3-way, euclid
+   4-way on the HDD).  ~100 tiles total.
+4. Then 3a-③ (53_ rewrite per the agreed dual SEx+DAO design below) —
+   ORDER agreed with user: detection → saturation flags (flag, never
+   drop) → SEx+PSFEx PSF photometry ALL sources (dual-image, 3a-① .psf
+   models) → DAO sharp/rnd1/rnd2 ALL sources → DAO PSFPhotometry on the
+   point-source pool (same PSFEx model via GriddedPSFModel) → 3b.
+
 ## ⚡ STATUS 2026-06-10 16:30 — Step 3a-① PSF models 100% COMPLETE
 
 **The LS rerun described below is DONE** (368/368, all `global_pooled`,

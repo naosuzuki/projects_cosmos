@@ -1,4 +1,7 @@
-# SExtractor config — JWST NIRCam χ² detection image, COLD pass.
+# SExtractor config — mission-generic χ²₊ detection image, COLD pass.
+# (Used for JWST 4-band, Euclid VIS+NISP, and HST F814W N=1 stacks;
+# PIXEL_SCALE / SEEING_FWHM / file names overridden on the command line
+# by 51_step3a_chi2_detect.py.)
 #
 # Adopts Shuntov+ 2025 (COSMOS2025 / COSMOS-Web galaxy catalog,
 # A&A 2025) parameters where specified, with CANDELS Galametz+ 2013
@@ -6,16 +9,17 @@
 # + large background mesh + low deblending → detects bright, extended
 # galaxies cleanly without shredding them into substructures.
 #
-# Input image is expected to be the χ²+ stack of the 4 NIRCam bands
-# (F115W + F150W + F277W + F444W), each PSF-homogenized to F444W and
-# multiplied by √WHT (noise-equalized).  Negative pixels truncated to
-# zero before stacking.
+# Input image is the χ₊ stack of the mission's bands — each band
+# PSF-homogenized to the broadest band, noise-equalized (×√WHT or
+# /σ_robust), negatives truncated to zero, then sqrt(mean of squares)
+# (the Szalay+99 / SWarp-CHI2 chi form; detection on the SQUARED image
+# is unstable, see 51_ docstring).
 #
 # Output: cold catalog FITS_LDAC + cold segmentation map.
 
 #-------------------------------- Catalog ------------------------------------
 CATALOG_TYPE     FITS_LDAC
-PARAMETERS_NAME  default_pass1.param    # detection-only columns + VIGNET
+PARAMETERS_NAME  chi2_detect.param      # detection columns + KRON_RADIUS
 
 #------------------------------- Extraction ----------------------------------
 DETECT_TYPE      CCD
