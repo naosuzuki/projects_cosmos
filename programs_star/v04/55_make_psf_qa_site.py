@@ -68,6 +68,8 @@ BANDS = [
     ('SDSS-r', 'SDSS r (DR17 frame)',    'sdss_r'),
     ('SDSS-i', 'SDSS i (DR17 frame)',    'sdss_i'),
     ('SDSS-z', 'SDSS z (DR17 frame)',    'sdss_z'),
+    ('unWISE-W1', 'unWISE W1 (neo7 coadd)', 'unwise_w1'),
+    ('unWISE-W2', 'unWISE W2 (neo7 coadd)', 'unwise_w2'),
 ]
 
 # canonical plot filenames (after symlinking into the site)

@@ -1,0 +1,66 @@
+{
+  "created_utc_iso": "2026-06-11T15:18:44Z",
+  "source": "64_step3a_unwise_global_saturation.py (per-tile turnover, 5 COSMOS neo7 tiles)",
+  "bands": {
+    "w1": {
+      "sat_onset_mag": 10.798737525939941,
+      "ceiling_K_counts": 76569.8832939302,
+      "method": "median_per_tile_turnover",
+      "n_tiles_measured": 5,
+      "pooled_onset_mag": 10.9616060256958,
+      "expected_onset_physics_AB": 10.7,
+      "per_tile": {
+        "1482p015": {
+          "sat_onset_mag": 10.963658332824707,
+          "ceiling_counts": 76569.8832939302
+        },
+        "1497p015": {
+          "sat_onset_mag": 10.65285873413086,
+          "ceiling_counts": 100233.91869684975
+        },
+        "1497p030": {
+          "sat_onset_mag": 11.077717781066895,
+          "ceiling_counts": 70009.77748952182
+        },
+        "1512p015": {
+          "sat_onset_mag": 10.72907829284668,
+          "ceiling_counts": 96706.54606385932
+        },
+        "1512p030": {
+          "sat_onset_mag": 10.798737525939941,
+          "ceiling_counts": 89283.90705467721
+        }
+      }
+    },
+    "w2": {
+      "sat_onset_mag": 10.236808776855469,
+      "ceiling_K_counts": 225951.5467418686,
+      "method": "median_per_tile_turnover",
+      "n_tiles_measured": 3,
+      "pooled_onset_mag": 10.279744148254395,
+      "expected_onset_physics_AB": 10.3,
+      "per_tile": {
+        "1482p015": {
+          "sat_onset_mag": null,
+          "ceiling_counts": null
+        },
+        "1497p015": {
+          "sat_onset_mag": null,
+          "ceiling_counts": null
+        },
+        "1497p030": {
+          "sat_onset_mag": 10.3313627243042,
+          "ceiling_counts": 218989.37303081088
+        },
+        "1512p015": {
+          "sat_onset_mag": 10.181960105895996,
+          "ceiling_counts": 241992.84055782997
+        },
+        "1512p030": {
+          "sat_onset_mag": 10.236808776855469,
+          "ceiling_counts": 232913.7204529263
+        }
+      }
+    }
+  }
+}

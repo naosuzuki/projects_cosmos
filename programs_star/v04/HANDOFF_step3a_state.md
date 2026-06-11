@@ -1,5 +1,25 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
+## ⚡ STATUS 2026-06-11 — 3a-① unWISE COMPLETE (10/10): all ground+space surveys now have PSF models
+
+**unWISE neo7 W1/W2 (data-collection session): DONE.**  5 COSMOS tiles ×
+w1/w2 = 10 models, all `per_tile_ceiling` saturation, χ²=0.36–0.42.
+- New: `54_step3a_build_psf_model_unwise.py` (SDSS-derived; 2.75″/px,
+  ZP_AB = 22.5 Vega + VEGA2AB {w1 2.699, w2 3.339}, no mask plane),
+  `64_step3a_unwise_global_saturation.py` → csv_saturation/
+  `unwise_global_onsets.json` (W1 onset 10.80 AB ceiling 7.66e4 counts;
+  W2 10.24 AB ceiling 2.26e5; matches WISE physics ~8.0/7.0 Vega).
+  Per-tile turnover missed W2's pinned mag~9.5 stars on 2/5 tiles —
+  global-JSON route fixed it (4–6 saturated now excluded per tile).
+- 56_: unwise_w1/w2 INSTRUMENTS entries + saturation-plot bright edge
+  is now onset-aware (was hard mag>13 / xlim 13.5 — unWISE's whole
+  saturated population fell off-frame).  60_: `unwise` mission added
+  (--reuse-pass1).  55_: unWISE-W1/W2 rows live on the QA site.
+- Caveat (intrinsic to WISE 6″ resolution): unresolved galaxies sit ON
+  the stellar locus; the SNR-weighted locus fit is star-dominated and
+  the purity probe cannot detect departure.  W1 ~1700–1900 model stars
+  per tile, W2 ~670–850.
+
 ## ⚡⚡⚡ STATUS 2026-06-11 night — 3a-② COMPLETE (96/96 tiles); 3a-③ + 3b coded & HST-validated
 
 **Step 3a-② detection: DONE.**  `65_run_chi2_detection.py`: 96 tiles OK,

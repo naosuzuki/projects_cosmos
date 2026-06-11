@@ -105,6 +105,9 @@ INSTRUMENTS = {
     'sdss_r': {'pix': 0.396, 'psfex': 'psfex_hsc.psfex', 'label': 'SDSS r'},
     'sdss_i': {'pix': 0.396, 'psfex': 'psfex_hsc.psfex', 'label': 'SDSS i'},
     'sdss_z': {'pix': 0.396, 'psfex': 'psfex_hsc.psfex', 'label': 'SDSS z'},
+    # unWISE neo7 coadds, 2.75"/px (W1 FWHM ~2.2 px, marginally sampled).
+    'unwise_w1': {'pix': 2.75, 'psfex': 'psfex_hsc.psfex', 'label': 'unWISE W1'},
+    'unwise_w2': {'pix': 2.75, 'psfex': 'psfex_hsc.psfex', 'label': 'unWISE W2'},
 }
 PIX        = 0.10      # arcsec/pixel — overwritten per-instrument in main()
 _PSFEX_CFG = 'psfex_euclid_vis.psfex'  # overwritten per-instrument in main()
@@ -501,7 +504,14 @@ def plot_mag_vs_chi2(out_png, mag_acc, chi2_acc, n1_acc, n3_acc, flg_acc, band_u
 def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
                          sat_peak_level=None, sat_onset_mag=None,
                          psf_star_mask=None):
-    ok = np.isfinite(mag) & (mag > 13) & (mag < 30)
+    # bright axis edge: 13.5 suits the optical surveys, but surveys that
+    # saturate brighter (unWISE onset ~10 AB, SDSS z ~12) need the frame to
+    # extend or the saturated sequence + onset line fall off-plot.
+    xlo = 13.5
+    if sat_onset_mag is not None and np.isfinite(sat_onset_mag) \
+            and sat_onset_mag < xlo + 0.5:
+        xlo = float(sat_onset_mag) - 3.0
+    ok = np.isfinite(mag) & (mag > xlo - 0.5) & (mag < 30)
     # bright/high-SNR point sources — these trace the (saturated) bright
     # sequence and are EXCLUDED from the PSF model; do not confuse with the
     # PSF model stars (red, below).  Kept only as context for the onset.
@@ -544,7 +554,7 @@ def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
                  fontsize=11, family='serif')
     ax.legend(loc='upper right', fontsize=10)
     ax.grid(alpha=0.25, which='both')
-    ax.set_xlim(13.5, 30.5)
+    ax.set_xlim(xlo, 30.5)
     ax.tick_params(which='both', direction='in', top=True, right=True,
                    labelsize=11, length=6)
     ax.tick_params(which='minor', length=3); ax.minorticks_on()
@@ -569,7 +579,7 @@ def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
     ax.set_title('Zoom — saturated bright sequence (orange) vs PSF stars (red)',
                  fontsize=11, family='serif')
     ax.legend(loc='upper right', fontsize=10)
-    ax.set_xlim(13.5, 25.5)
+    ax.set_xlim(xlo, 25.5)
     ax.xaxis.set_major_locator(MultipleLocator(2))
     ax.grid(True, which='major', alpha=0.4)
     ax.tick_params(which='both', direction='in', top=True, right=True,

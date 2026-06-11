@@ -50,7 +50,7 @@ HSC_BANDS  = ['g', 'r', 'i', 'z', 'y']                         # tract-9813 griz
 # tolerate more.  HSC deepCoadd patches are 4200² (modest) but each build
 # writes a ~70 MB cleaned-image copy, so keep it middling.
 DEFAULT_JOBS = {'jwst': 3, 'hst': 3, 'euclid': 6, 'euclid_nisp': 6, 'hsc': 4,
-                'lsdr10': 4, 'ps1': 4, 'sdss': 6}
+                'lsdr10': 4, 'ps1': 4, 'sdss': 6, 'unwise': 4}
 
 # big per-tile intermediates to delete once the model + plots + meta exist,
 # so a 160-tile run doesn't pile up ~1 TB on the scratch disk.  Kept: the .psf
@@ -80,6 +80,7 @@ PS1_SKY  = Path('/Volumes/exdisk1/data/PanStarrs/COSMOS/skycells/rings.v3.skycel
 
 
 SDSS_FRAMES = Path('/Volumes/exdisk1/data/SDSS/COSMOS/frames')
+UW_NEO7     = Path('/Volumes/exdisk1/data/unWISE/COSMOS/neo7')
 
 
 def sdss_avail():
@@ -120,6 +121,16 @@ def hsc_avail():
     avail = set()
     for f in HSC.glob('s23b_deep2/9813/*/*/deepCoadd_calexp_9813_*_*.fits'):
         m = re.search(r'deepCoadd_calexp_9813_(\d+)_([grizy])_', f.name)
+        if m:
+            avail.add((m.group(1), m.group(2)))
+    return avail
+
+
+def unwise_avail():
+    """Set of (tile, band) unWISE neo7 coadds on disk (img-m, plain or .gz)."""
+    avail = set()
+    for f in UW_NEO7.glob('*/*/unwise-*-img-m.fits*'):
+        m = re.search(r'unwise-(\d{4}[pm]\d{3})-(w[12])-img-m\.fits', f.name)
         if m:
             avail.add((m.group(1), m.group(2)))
     return avail
@@ -225,6 +236,19 @@ def build_worklist(missions):
                            '--frame', frame, '--filter', b, '--reuse-pass1'],
                 plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
                           '--instrument', inst, '--tile', frame]))
+    if 'unwise' in missions:
+        # unWISE neo7 coadds (5 COSMOS tiles) × w1/w2; --reuse-pass1 so the
+        # 64_unwise pooled pre-pass catalogs are not redone.
+        for tile, b in sorted(unwise_avail()):
+            inst = f'unwise_{b}'
+            meta = WORK / inst / tile / 'psf' / f'psf_{tile}.meta.json'
+            items.append(dict(
+                mission='unwise', instrument=inst, tile=tile, band=b, suffix=tile,
+                meta=meta,
+                build_cmd=[PY, str(HERE / '54_step3a_build_psf_model_unwise.py'),
+                           '--tile', tile, '--filter', b, '--reuse-pass1'],
+                plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
+                          '--instrument', inst, '--tile', tile]))
     return items
 
 
@@ -309,7 +333,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--missions', default='jwst,hst,euclid',
-                   help='comma list of jwst,hst,euclid,euclid_nisp,hsc,lsdr10,ps1')
+                   help='comma list of jwst,hst,euclid,euclid_nisp,hsc,lsdr10,ps1,sdss,unwise')
     p.add_argument('--jobs', type=int, default=None,
                    help='override per-mission concurrency for all missions')
     p.add_argument('--force', action='store_true', help='reprocess even if done')
