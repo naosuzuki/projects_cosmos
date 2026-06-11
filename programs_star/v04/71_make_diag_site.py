@@ -1,24 +1,26 @@
 #!/usr/bin/env python
 """
 71_make_diag_site.py — static HTML site for the Step 3a-③/3b stellar
-diagnostics (70_step3a_diag_plots.py), in the style of the PSF QA site
-(55_make_psf_qa_site.py).
+diagnostics (70_step3a_diag_plots.py), organized EXACTLY like the PSF
+QA site (55_make_psf_qa_site.py):
 
-Layout
-------
   html/diag_qa/
-    index.html                  mission selector + per-tile star counts
-    jwst.html, hst.html, euclid.html
-    plots/<mission>/<tile>/     symlinks to the canonical PNGs under
-                                /Volumes/exdisk1/.../<tile>/phot/
-    css/style.css               copied from psf_qa if present
+    index.html               band-card grid (one card per band,
+                              "N tiles" status)
+    F814W.html, F115W.html, …, VIS.html, NISP-Y.html, …
+                              per-band pages: table with ONE ROW PER
+                              TILE × 4 diagnostic panels + 3b summary
+    plots/<BAND>/<tile>/*.png symlinks to the canonical PNGs
+    css/style.css             copied from psf_qa (same look)
 
-Per (mission, tile) section: star-count header (3b meta), then one row
-per band: diag3 composite PSF, diag4 profile, diag1 RA/Dec map, diag2
-photometry comparison; plus the cross-band profile overlay and the 3b
-envelope sheet.  Click any thumbnail → full PNG.
+Panels per (band, tile) row:
+  1. composite PSF (×9 drizzle, sqrt stretch, ±1.2″)
+  2. profile cut (peak-normalized)
+  3. star RA/Dec map (color/size = mag, solid n₁=0 / open n₁>0)
+  4. aperture-vs-PSF photometry (APER−PSFEx, APER−DAO, PSFEx−DAO)
+  5. 3b envelope sheet (per-tile, all bands — same image each row)
 
-Re-run after producing more tiles (resumable; cheap — symlinks only).
+Re-run after producing more tiles; symlinks only, instant.
 """
 from __future__ import annotations
 import json
@@ -27,29 +29,34 @@ from textwrap import dedent
 
 PROJECT  = Path('/Users/suzuki/github/projects_cosmos')
 HTML_DIR = PROJECT / 'html' / 'diag_qa'
+PSFQA    = PROJECT / 'html' / 'psf_qa'
 WORK     = Path('/Volumes/exdisk1/data/photometry_v04')
 
-MISSIONS = [('jwst', 'JWST NIRCam (F115W/F150W/F277W/F444W)'),
-            ('hst', 'HST ACS (F814W)'),
-            ('euclid', 'Euclid (VIS + NISP Y/J/H)')]
+# (page name, display label, mission, band key) — order = index order
+BANDS = [
+    ('F814W',  'HST ACS F814W',          'hst',    'f814w'),
+    ('F115W',  'JWST NIRCam F115W (SW)', 'jwst',   'f115w'),
+    ('F150W',  'JWST NIRCam F150W (SW)', 'jwst',   'f150w'),
+    ('F277W',  'JWST NIRCam F277W (LW)', 'jwst',   'f277w'),
+    ('F444W',  'JWST NIRCam F444W (LW)', 'jwst',   'f444w'),
+    ('VIS',    'Euclid VIS',             'euclid', 'vis'),
+    ('NISP-Y', 'Euclid NISP Y',          'euclid', 'nisp_y'),
+    ('NISP-J', 'Euclid NISP J',          'euclid', 'nisp_j'),
+    ('NISP-H', 'Euclid NISP H',          'euclid', 'nisp_h'),
+]
 
-CSS = dedent('''
-    body { font-family: -apple-system, Helvetica, sans-serif;
-           margin: 1.2em 2em; background: #fafafa; color: #222; }
-    h1 { font-size: 1.5em; } h2 { font-size: 1.2em; margin-top: 1.6em;
-         border-bottom: 2px solid #888; padding-bottom: .2em; }
-    h3 { font-size: 1.0em; margin: 1.0em 0 .3em; }
-    table.idx { border-collapse: collapse; }
-    table.idx td, table.idx th { border: 1px solid #ccc;
-        padding: .35em .8em; font-size: .95em; }
-    .thumbrow { white-space: nowrap; overflow-x: auto; margin: .3em 0; }
-    .thumbrow a { display: inline-block; margin-right: .4em; }
-    .thumbrow img { height: 200px; border: 1px solid #bbb;
-        background: #fff; }
-    .meta { color: #555; font-size: .9em; }
-    a { color: #0645ad; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-''')
+PANELS = [
+    ('diag3_psf_composite', 'Composite PSF (×9 drizzle, √ stretch)'),
+    ('diag4_psf_profile',   'Profile Cut (peak-normalized)'),
+    ('diag1_stars_radec',   'Star Map RA/Dec (mag-coded)'),
+    ('diag2_phot_compare',  'Aperture vs PSF / DAO Photometry'),
+]
+
+
+def tile_sort_key(t: str):
+    if t[0] in 'AB' and t[1:].isdigit():
+        return (t[0], int(t[1:]))
+    return ('Z', t)
 
 
 def star_meta(mission: str, tile: str) -> dict:
@@ -60,111 +67,120 @@ def star_meta(mission: str, tile: str) -> dict:
         return {}
 
 
-def link_plots(mission: str, tile: str) -> list[str]:
-    """Symlink every diag*/star_envelopes PNG; return names found."""
-    src = WORK / f'{mission}_chi2' / tile / 'phot'
-    dst = HTML_DIR / 'plots' / mission / tile
-    names = []
-    for p in sorted(src.glob('diag*.png')) + \
-            sorted(src.glob('star_envelopes_*.png')):
-        dst.mkdir(parents=True, exist_ok=True)
-        ln = dst / p.name
-        if ln.is_symlink() or ln.exists():
-            ln.unlink()
-        ln.symlink_to(p)
-        names.append(p.name)
-    return names
+def link(src: Path, band_page: str, tile: str) -> str | None:
+    if not src.exists():
+        return None
+    dst = HTML_DIR / 'plots' / band_page / tile
+    dst.mkdir(parents=True, exist_ok=True)
+    ln = dst / src.name
+    if ln.is_symlink() or ln.exists():
+        ln.unlink()
+    ln.symlink_to(src)
+    return f'plots/{band_page}/{tile}/{src.name}'
 
 
-def tile_section(mission: str, tile: str, names: list[str],
-                 meta: dict) -> str:
-    rel = f'plots/{mission}/{tile}'
-    bands = sorted({n.split(f'_{tile}_')[1][:-4] for n in names
-                    if f'_{tile}_' in n and n.startswith('diag')})
-    hdr = ''
-    if meta:
-        hdr = (f"<span class='meta'>sources {meta.get('n_sources', 0):,} "
-               f"· is_star {meta.get('n_is_star', 0):,} "
-               f"(votes {meta.get('n_by_votes', 0):,}, "
-               f"Gaia-PM {meta.get('n_gaia_pm_significant', 0):,})</span>")
-    out = [f'<h2 id="{tile}">{tile} {hdr}</h2>']
-    for b in bands:
-        row = []
-        for k in (3, 4, 1, 2):
-            n = f'diag{k}_' + {1: 'stars_radec', 2: 'phot_compare',
-                               3: 'psf_composite', 4: 'psf_profile'}[k] + \
-                f'_{tile}_{b}.png'
-            if n in names:
-                row.append(f'<a href="{rel}/{n}" target="_blank">'
-                           f'<img src="{rel}/{n}" loading="lazy"></a>')
-        if row:
-            out.append(f'<h3>{b}</h3><div class="thumbrow">'
-                       + ''.join(row) + '</div>')
-    extras = [n for n in names
-              if n == f'diag4_psf_profile_{tile}.png'
-              or n.startswith('star_envelopes')]
-    if extras:
-        row = ''.join(f'<a href="{rel}/{n}" target="_blank">'
-                      f'<img src="{rel}/{n}" loading="lazy"></a>'
-                      for n in extras)
-        out.append(f'<h3>cross-band profile + 3b envelopes</h3>'
-                   f'<div class="thumbrow">{row}</div>')
-    return '\n'.join(out)
+def band_page(page: str, label: str, mission: str, band: str) -> int:
+    rows = []
+    tiles = sorted((p.parent.parent.name for p in
+                    WORK.glob(f'{mission}_chi2/*/phot/'
+                              f'phot_*.meta.json')), key=tile_sort_key)
+    for tile in tiles:
+        phot = WORK / f'{mission}_chi2' / tile / 'phot'
+        cells = []
+        n_found = 0
+        for stem, _ in PANELS:
+            rel = link(phot / f'{stem}_{tile}_{band}.png', page, tile)
+            if rel:
+                n_found += 1
+                cells.append(f'<td class="panel"><a href="{rel}" '
+                             f'target="_blank"><span class="thumb-box">'
+                             f'<img src="{rel}" loading="lazy"/></span>'
+                             f'</a></td>')
+            else:
+                cells.append('<td class="panel">—</td>')
+        rel = link(phot / f'star_envelopes_{tile}.png', page, tile)
+        cells.append(f'<td class="panel"><a href="{rel}" target="_blank">'
+                     f'<span class="thumb-box"><img src="{rel}" '
+                     f'loading="lazy"/></span></a></td>'
+                     if rel else '<td class="panel">—</td>')
+        if n_found == 0 and rel is None:
+            continue
+        m = star_meta(mission, tile)
+        info = (f"<br><span style='font-weight:400;font-size:11px;"
+                f"color:#666'>{m.get('n_is_star', '—')}★ / "
+                f"{m.get('n_sources', '—')}</span>" if m else '')
+        rows.append(f'<tr><td class="tile-name">{tile}{info}</td>'
+                    + ''.join(cells) + '</tr>')
+    head = ''.join(f'<th>{t}</th>' for _, t in PANELS)
+    page_html = dedent(f'''<!doctype html>
+        <html><head>
+          <meta charset="utf-8">
+          <title>Stellar diagnostics — {label}</title>
+          <link rel="stylesheet" href="css/style.css">
+        </head><body>
+        <header>
+          <h1>Stellar diagnostics — {label}
+          <span style="font-weight:400; font-size:14px;">
+          [<a href="index.html">&larr; back</a>]</span></h1>
+        </header>
+        <div class="wrap">
+          <p>Stars only (Step 3b is_star).  Solid = isolated (n&#8321;=0),
+          open = neighbour within 1&Prime;.  Tile cell shows
+          is_star / total sources.</p>
+          <table class="tiles">
+            <thead><tr><th>Tile</th>{head}<th>3b Envelopes
+            (all bands)</th></tr></thead>
+            <tbody>
+            {''.join(rows)}
+            </tbody>
+          </table>
+        </div>
+        </body></html>''')
+    (HTML_DIR / f'{page}.html').write_text(page_html)
+    return len(rows)
 
 
 def main():
     (HTML_DIR / 'css').mkdir(parents=True, exist_ok=True)
-    old_css = PROJECT / 'html' / 'psf_qa' / 'css' / 'style.css'
-    (HTML_DIR / 'css' / 'style.css').write_text(
-        old_css.read_text() if old_css.exists() else CSS)
+    css = PSFQA / 'css' / 'style.css'
+    if css.exists():
+        (HTML_DIR / 'css' / 'style.css').write_text(css.read_text())
 
-    index_rows = []
-    for mission, label in MISSIONS:
-        sections = []
-        toc = []
-        for tdir in sorted((WORK).glob(f'{mission}_chi2/*/phot')):
-            tile = tdir.parent.name
-            names = link_plots(mission, tile)
-            if not names:
-                continue
-            meta = star_meta(mission, tile)
-            sections.append(tile_section(mission, tile, names, meta))
-            toc.append(f'<a href="#{tile}">{tile}</a>')
-            index_rows.append(
-                f'<tr><td><a href="{mission}.html#{tile}">{mission}'
-                f'/{tile}</a></td>'
-                f"<td>{meta.get('n_sources', '—')}</td>"
-                f"<td>{meta.get('n_is_star', '—')}</td>"
-                f"<td>{meta.get('n_by_votes', '—')}</td>"
-                f"<td>{meta.get('n_gaia_pm_significant', '—')}</td></tr>")
-        page = dedent(f'''<!DOCTYPE html><html><head>
-            <meta charset="utf-8"><title>{label} — stellar diagnostics</title>
-            <link rel="stylesheet" href="css/style.css"></head><body>
-            <h1>{label} — Step 3a-③/3b stellar diagnostics</h1>
-            <p><a href="index.html">&larr; index</a> &nbsp; tiles:
-            {' · '.join(toc)}</p>
-            {''.join(sections)}
-            </body></html>''')
-        (HTML_DIR / f'{mission}.html').write_text(page)
-        print(f'{mission}: {len(toc)} tiles')
+    cards = []
+    for page, label, mission, band in BANDS:
+        n = band_page(page, label, mission, band)
+        status = (f'<div class="status done">{n} tiles processed</div>'
+                  if n else '<div class="status">no tiles yet</div>')
+        cards.append(f'<div class="band-card">\n'
+                     f'  <a href="{page}.html">{label}</a>\n'
+                     f'  {status}\n</div>\n')
+        print(f'{page:8s} {n} tiles')
 
-    idx = dedent(f'''<!DOCTYPE html><html><head>
-        <meta charset="utf-8"><title>Stellar diagnostics QA</title>
-        <link rel="stylesheet" href="css/style.css"></head><body>
-        <h1>Step 3a-③ / 3b stellar diagnostics</h1>
-        <p>Per (mission, tile): composite PSF (×9 drizzle, sqrt stretch,
-        ±1.2&Prime;), profile cuts, star RA/Dec map, aperture-vs-PSF
-        photometry; stars only (3b is_star), solid = isolated,
-        open = n&#8321;&gt;0.  Sibling site:
-        <a href="../psf_qa/index.html">PSF-model QA (3a-①)</a>.</p>
-        <p>Missions: {' · '.join(f'<a href="{m}.html">{l}</a>'
-                                 for m, l in MISSIONS)}</p>
-        <table class="idx"><tr><th>tile</th><th>sources</th>
-        <th>is_star</th><th>by votes</th><th>Gaia-PM</th></tr>
-        {''.join(index_rows)}</table>
+    idx = dedent(f'''<!doctype html>
+        <html><head>
+          <meta charset="utf-8">
+          <title>Stellar diagnostics QA — COSMOS cross-mission v04</title>
+          <link rel="stylesheet" href="css/style.css">
+        </head><body>
+        <header>
+          <h1>Stellar Diagnostics — COSMOS Cross-Mission Catalog v04 /
+          Step 3a-③ &amp; 3b</h1>
+        </header>
+        <div class="wrap">
+          <p>Per-band stellar diagnostics (stars = Step 3b is_star).
+          Click a band to see one row per tile: composite PSF
+          (&times;9 drizzle, sqrt stretch, &plusmn;1.2&Prime;), profile
+          cut, star RA/Dec map, aperture-vs-PSF photometry, and the 3b
+          classifier envelopes.  Click any panel for the full image.
+          Sibling site: <a href="../psf_qa/index.html">PSF-model QA
+          (Step 3a-①)</a>.</p>
+          <div class="band-grid">
+          {''.join(cards)}
+          </div>
+        </div>
         </body></html>''')
     (HTML_DIR / 'index.html').write_text(idx)
-    print(f'[save] {HTML_DIR}/index.html  ({len(index_rows)} tile rows)')
+    print(f'[save] {HTML_DIR}/index.html')
 
 
 if __name__ == '__main__':
