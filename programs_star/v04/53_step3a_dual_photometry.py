@@ -139,7 +139,14 @@ def run_dual(mission: str, tile: str, band: str, mode: str,
     cmd = ['sex', f'{det},{meas_img}',
            '-c',               str(CONFIGS / f'chi2_{mode}.sex'),
            '-CATALOG_NAME',    str(out_cat),
-           '-PARAMETERS_NAME', str(CONFIGS / 'default_pass2.param'),
+           # pass2_psf.param = default_pass2 minus SPREAD_MODEL: the
+           # galaxy-model machinery behind SPREAD_MODEL is ~170× the
+           # cost of the entire rest of the pass (404.6 s vs 2.4 s on a
+           # 4.2 Mpx benchmark, 2026-06-11) and 3b does not use it.
+           # SPREAD_MODEL for the 66_ point-source pool: compute later,
+           # pool candidates only, if the tilted locus + DAO vetoes
+           # prove insufficient.
+           '-PARAMETERS_NAME', str(CONFIGS / 'pass2_psf.param'),
            '-STARNNW_NAME',    str(CONFIGS / 'default.nnw'),
            '-FILTER_NAME',     str(CONFIGS / (
                'tophat_9.0_9x9.conv' if mode == 'cold'
@@ -290,9 +297,16 @@ def main():
         bmeta = band_meta(args.mission, args.tile, band)
         zp = float(bmeta.get('zp_ab', 30.0))
         psf = bmeta.get('psf_model')
-        if psf and not Path(psf).exists():
-            print(f'  [warn] psf model missing on disk: {psf}')
-            psf = None
+        if psf:
+            # prefer the 6×FWHM photometry crop (68_) — the full 201–301
+            # sample morphology raster makes the per-source fit ~10–40×
+            # slower for identical core photometry
+            crop = Path(psf).with_name(Path(psf).stem + '_phot.psf')
+            if crop.exists():
+                psf = str(crop)
+            elif not Path(psf).exists():
+                print(f'  [warn] psf model missing on disk: {psf}')
+                psf = None
         binfo = dict(used=True, zp_ab=zp, psf_model=psf,
                      psf_meta_found=bool(bmeta))
 

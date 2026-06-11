@@ -1,5 +1,49 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
+## ⚡⚡⚡ STATUS 2026-06-11 night — 3a-② COMPLETE (96/96 tiles); 3a-③ + 3b coded & HST-validated
+
+**Step 3a-② detection: DONE.**  `65_run_chi2_detection.py`: 96 tiles OK,
+0 fail (20 JWST + 20 HST + 60 Euclid), 2.8 h.  Final recipe v3 in 51_:
+- χ₊ = sqrt(Σ/N(x,y)) per-pixel band count + binary coverage MAP_WEIGHT
+  (chi2_<tile>.wht.fits); HST = SIGNED single-band image (truncation
+  collapsed the background estimator: A4 went 86 → 11,938 sources).
+- hot DETECT_THRESH per mission via negative-image QA (in every chi2
+  meta): jwst 5.0σ (4.3% spurious), euclid 4.0σ (4.5%), hst 3.0σ (0.0%).
+  Cold pass is pure everywhere (≤0.8%).  Euclid rim tiles legitimately
+  show high negqa (BGSUB edge residuals) — flagged by meta, not deleted.
+- A4 sanity: 53,703 merged ≈ COSMOS2025 density.  ms.tex §B.1 eq.
+  (chi2plus) needs amending (sqrt + per-pixel N + signed single-band).
+
+**Step 3a-③ (53_step3a_dual_photometry.py): coded, HST A4 validated.**
+Dual-image (det=chi₊+weight, meas=native band) forced PSF photometry
+with the 3a-① stars_<tile>.psf, ZP/sat levels from 3a-① metas,
+NUMBER-aligned join (no positional matching), saturation = flag never
+drop (core-masked | peak-plateau | onset-mag), DAO sharp/rnd1/rnd2
+KDTree-matched to the spine.  HST A4: 11,938 rows × 51 cols; PSF mags
+all finite; Gaia check G−F814W = −0.18 ± 0.54; 65 saturated flagged;
+DAO matched 84%.  CAVEAT: CHI2_PSF absolute scale is arbitrary (weight
+scale + GAIN 0 → no Poisson term) — fine for 3b envelopes (same scale
+in training), absolute interpretation deferred.  DAO morphology is the
+slow stage (HST A4 ~2 h under disk contention) — profile before the
+photometry mass run.  DAO PSF-FITTING photometry on the point-source
+pool (psf_phot_consistent, GriddedPSFModel) = 66_, NOT yet written
+(not needed by 3b).
+
+**Step 3b (67_step3b_classifier.py): coded, machinery validated on HST A4.**
+Gaia wide-CSV match (1″), PM ≥5σ & ≥5 mas/yr training, per-band
+per-mag percentile envelopes (CHI2_PSF one-sided; DAO sharp/rnd1/rnd2
+two-sided), is_star_psf_<band>, aggregate = Gaia-PM OR ≥3 unsaturated
+votes.  DEVIATION (documented in 67_ docstring): training G window
+14–21 not 14–18 — the locked window is itself saturated in deep space
+imaging (HST onset 19.0 → 4 usable stars).  HST A4: 30 training stars,
+4 envelopes, 617 band votes, is_star=81 (Gaia-PM; 1-band tiles can't
+reach 3 votes until the cross-mission union).
+
+**In flight when this was written:** 53_ on jwst/A4 and euclid/101541375
+(then 67_ on both — euclid 4 bands = first real ≥3-vote aggregate test).
+**Next:** profile/speed DAO → photometry mass run over 96 tiles → 67_
+everywhere → 66_ DAO pool photometry → cross-mission union (Step 5 prep).
+
 ## ⚡⚡ STATUS 2026-06-10 evening — Step 3a-② detection REWRITTEN, A4-validated, mass run PENDING
 
 **51_step3a_chi2_detect.py is now mission-generic** (jwst / hst / euclid;
