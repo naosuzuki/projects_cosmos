@@ -1,52 +1,73 @@
 #!/usr/bin/env python
 """
-51_step3a_chi2_detect.py — Step 3a-② mission-generic χ²₊ hot+cold detection.
+51_step3a_chi2_detect.py — Step 3a-② mission-generic χ₊ hot+cold detection.
 
 Builds the χ₊ detection image per (mission, tile) and runs the
 SExtractor cold + hot passes, then merges via the cold-Kron-ellipse
 criterion.  Follows the Shuntov+ 2025 (COSMOS2025) recipe verified
 against Galametz+ 2013 (CANDELS); locked plan in ms.tex §B.1 Step 3a,
-eq. (chi2plus), in its SQUARE-ROOT (chi) form:
+eq. (chi2plus), in its SQUARE-ROOT (chi) form with PER-PIXEL band-count
+normalization:
 
-    χ₊(x,y) = sqrt( (1/N) Σ_b [ max( SCI^h_b(x,y)·√WHT_b(x,y), 0 ) ]² )
+    χ₊(x,y) = sqrt( (1/N(x,y)) Σ_b [ max( SCI^h_b·√WHT_b, 0 ) ]² )
 
-IMPORTANT — why the sqrt (2026-06-10, validated on JWST A4):
-ms.tex eq. (chi2plus) writes the straight sum of squares, but detecting
-on the SQUARED image is numerically unstable: its noise floor is so
-skewed that SExtractor's mesh-clipped background-RMS map blows up
-around sources (p99 of the RMS map 107 vs 242 for two kernel sets that
-differ by only ~15%), and the A4 cold count swung 10,913 → 2,163 from
-that kernel tweak alone.  The sqrt form is what SWarp's CHI2 combine
-(Szalay+ 1999) actually produces — i.e. what Shuntov+ 2025 and
-Galametz+ 2013 really ran SExtractor on — and its background is
-near-Gaussian: same A4 cutout, cold counts 315 vs 323 (2.5%) and a
-stable RMS map (p99 0.69 vs 0.70) across the same kernel change.
-DETECT_THRESH in σ is only meaningful on this form.  (ms.tex §B.1
-equation to be amended accordingly.)
+where N(x,y) = number of bands actually covering pixel (x,y).
+
+RECIPE NOTES (all empirically forced, 2026-06-10, JWST A4 + Euclid
+101538497 + HST A4 validation runs):
+
+1. sqrt, NOT the squared form of ms.tex eq. (chi2plus): on the squared
+   image SExtractor's mesh-clipped background-RMS map is unstable
+   (RMS-map p99 107 vs 242 for kernel sets differing by ~15%; A4 cold
+   counts swung 10,913 → 2,163).  The sqrt form is what SWarp's CHI2
+   combine (Szalay+ 1999) actually produces — i.e. what Shuntov+ 2025
+   and Galametz+ 2013 really ran on — and is stable (same kernel
+   change: 315 vs 323 cold, 2.5%).  ms.tex eq. to be amended.
+
+2. PER-PIXEL N(x,y) + a binary coverage MAP_WEIGHT: bands cover
+   DIFFERENT subsets of a tile (Euclid rim tile 101538497: VIS 7%,
+   NISP 3.8%, partly disjoint).  A global /N makes the noise floor
+   spatially non-uniform and coverage edges flood the catalog
+   (negqa there: cold neg/pos = 270/101).  The weight map
+   (chi2_<tile>.wht.fits, ncov>0) masks zero-coverage sky.
+
+3. SINGLE-BAND missions (HST F814W) detect on the SIGNED noise-
+   equalized image drz×√wht — NO positive truncation.  Truncating an
+   N=1 image zeroes ~half of all sky pixels and SExtractor's
+   background-mode estimator collapses onto the zero spike (HST A4:
+   1 cold detection on the whole tile).  "Single band (no stack)" in
+   ms.tex therefore means classic single-image detection.
+
+4. Hot-pass DETECT_THRESH is per-mission (MISSIONS dict), calibrated
+   by the built-in negative-image QA: the Shuntov 3.0σ hot pass is
+   spurious-DOMINATED on homogenization-correlated noise (JWST A4
+   cutout: neg/pos 1.39 @3.0σ → 0.056 @5.0σ; cold is pure, neg=0).
+   Every tile records its own negqa in the chi2 meta.
 
 Missions (detection stacks per ms.tex §B.1):
   jwst    F115W+F150W+F277W+F444W → homogenized to F444W   (i2d SCI/WHT)
   euclid  VIS + NISP Y/J/H        → homogenized to NISP H  (MER BGSUB,
           no RMS maps on disk → per-band robust σ, measured AFTER the
           homogenization convolution, replaces √WHT)
-  hst     F814W single band (N=1 stack; drz × √wht)
+  hst     F814W single band — signed drz×√wht, no truncation
 
 PSF homogenization uses a Gaussian kernel with σ²_k = σ²_tgt − σ²_src,
 where each band's FWHM is the EMPIRICAL PSFEx value from the Step 3a-①
 meta JSON of the same tile (fallback: per-instrument median over all
 tiles, then a static estimate).
 
-Per tile the script is resumable: the χ²₊ image is reused only when its
-sidecar meta matches the requested (bands, target, fwhm) configuration,
+Per tile the script is resumable: the χ₊ image is reused only when its
+sidecar meta matches the requested configuration (incl. RECIPE_VERSION),
 and a completed run (detect meta + merged catalog present) is skipped
 unless --force.
 
 Outputs under /Volumes/exdisk1/data/photometry_v04/<mission>_chi2/<TILE>/:
-  chi2_<TILE>.fits            χ²₊ detection image (float32, target-band WCS)
-  chi2_<TILE>.meta.json       stack provenance (bands, σ/WHT mode, FWHMs)
+  chi2_<TILE>.fits            χ₊ detection image (float32, target-band WCS)
+  chi2_<TILE>.wht.fits        binary coverage weight (uint8, ncov>0)
+  chi2_<TILE>.meta.json       stack provenance + per-tile negative QA
   cat_cold_<TILE>.fits        FITS_LDAC cold catalog
   cat_hot_<TILE>.fits         FITS_LDAC hot catalog
-  seg_cold_<TILE>.fits        cold segmentation (drives the merge QA)
+  seg_cold_<TILE>.fits        cold segmentation
   seg_hot_<TILE>.fits         hot segmentation
   merged_<TILE>.fits          merged catalog + DETECT_MODE cold/hot + SOURCE_ID
   detect_<TILE>.meta.json     counts, timings, parameters (resume marker)
@@ -74,32 +95,36 @@ AB_TILES = [f'{r}{n}' for r in 'AB' for n in range(1, 11)]
 
 # mission → (band list, homogenization target, pixel scale ["/px],
 #            instrument-dir name per band [for the 3a-① meta lookup],
-#            hot_thresh: per-mission HOT DETECT_THRESH override).
+#            hot_thresh: per-mission HOT DETECT_THRESH override,
+#            single_band: detect on the signed image, no truncation).
 #
-# hot_thresh provenance: the Shuntov hot pass (3.0σ, MINAREA 8) is
-# spurious-DOMINATED on our stacks because the PSF-homogenization
-# kernels correlate the noise (negative-image test on JWST A4 cutout:
-# neg/pos = 1.39 @3.0σ → 0.056 @5.0σ; cold pass is pure, neg = 0).
-# Each mission's value is calibrated from its own per-tile
-# negative-image QA (negqa_* in the chi2 meta); None = config default
-# (3.0) until calibrated.
+# hot_thresh provenance: see docstring note 4.  None = config default
+# (3.0) until calibrated from that mission's per-tile negqa.
 MISSIONS = {
     'jwst': dict(
         bands=['f115w', 'f150w', 'f277w', 'f444w'], target='f444w',
-        pixscale=0.030, hot_thresh=5.0,
+        pixscale=0.030, hot_thresh=5.0, single_band=False,
         inst={b: f'jwst_nircam_{b}' for b in
               ('f115w', 'f150w', 'f277w', 'f444w')}),
     'hst': dict(
-        bands=['f814w'], target='f814w', pixscale=0.030, hot_thresh=None,
+        bands=['f814w'], target='f814w', pixscale=0.030,
+        hot_thresh=None, single_band=True,
         inst={'f814w': 'hst_acs_f814w'}),
+    # euclid hot_thresh=4.0: central-tile 101541375 sweep — neg/pos
+    # 0.299 @3.0σ → 0.045 @4.0σ keeping 89% of hot sources (JWST's
+    # operating point is 4.3% @5.0σ).  HST stays 3.0: its signed
+    # single-band image shows ZERO negative-image detections on A4.
     'euclid': dict(
         bands=['vis', 'nisp_y', 'nisp_j', 'nisp_h'], target='nisp_h',
-        pixscale=0.100, hot_thresh=None,
+        pixscale=0.100, hot_thresh=4.0, single_band=False,
         inst={'vis': 'euclid_vis', 'nisp_y': 'euclid_nisp_y',
               'nisp_j': 'euclid_nisp_j', 'nisp_h': 'euclid_nisp_h'}),
 }
 
-RECIPE_VERSION = 2          # 2 = chi (sqrt) statistic + negative-image QA
+# 2 = chi (sqrt) statistic + negative-image QA
+# 3 = per-pixel band-count normalization + coverage MAP_WEIGHT +
+#     signed (untruncated) detection image for single-band missions
+RECIPE_VERSION = 3
 NEGQA_WINDOW = 8192         # central window (px) for the per-tile negative QA
 
 # last-resort FWHM estimates (arcsec) if NO 3a-① meta exists anywhere
@@ -173,7 +198,8 @@ def kernel_sigma_px(fwhm_src: float, fwhm_tgt: float, pixscale: float) -> float:
 
 
 # ----------------------------------------------------------------------
-# per-mission band loaders → noise-equalized, homogenized NSCI
+# per-mission band loaders → SIGNED noise-equalized homogenized NSCI
+# + coverage mask
 # ----------------------------------------------------------------------
 def _strip_structural(hdr) -> dict:
     drop = ('SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND',
@@ -194,12 +220,15 @@ def load_jwst_nsci(tile: str, band: str, sigma_px: float):
         wht = h['WHT'].data.astype(np.float32, copy=True)
     if sigma_px > 0.1:
         sci = gaussian_filter(sci, sigma_px, mode='constant', cval=0)
+    cov = wht > 0
     np.sqrt(np.maximum(wht, 0, out=wht), out=wht)
     sci *= wht
     del wht
     print(f'    {band:7s} shape {sci.shape}  σ_k={sigma_px:.2f} px '
-          f'noise=√WHT  ({time.time()-t0:.0f}s)', flush=True)
-    return sci, hdr, dict(noise='sqrt_WHT')
+          f'noise=√WHT  cov={cov.mean():.1%}  ({time.time()-t0:.0f}s)',
+          flush=True)
+    return sci, hdr, dict(noise='sqrt_WHT',
+                          coverage_frac=round(float(cov.mean()), 4)), cov
 
 
 def load_hst_nsci(tile: str, band: str, sigma_px: float):
@@ -220,13 +249,15 @@ def load_hst_nsci(tile: str, band: str, sigma_px: float):
         wht = h[0].data.astype(np.float32, copy=True)
     if sigma_px > 0.1:
         sci = gaussian_filter(sci, sigma_px, mode='constant', cval=0)
+    cov = wht > 0
     np.sqrt(np.maximum(wht, 0, out=wht), out=wht)
     sci *= wht
     del wht
     print(f'    {band:7s} shape {sci.shape}  σ_k={sigma_px:.2f} px '
           f'noise=√wht ({drz.name.split("_30mas")[0][-7:]})  '
-          f'({time.time()-t0:.0f}s)', flush=True)
-    return sci, hdr, dict(noise='sqrt_WHT', drz=drz.name)
+          f'cov={cov.mean():.1%}  ({time.time()-t0:.0f}s)', flush=True)
+    return sci, hdr, dict(noise='sqrt_WHT', drz=drz.name,
+                          coverage_frac=round(float(cov.mean()), 4)), cov
 
 
 def _euclid_mosaic(tile: str, band: str) -> Path | None:
@@ -243,7 +274,7 @@ def load_euclid_nsci(tile: str, band: str, sigma_px: float):
     MER RMS mosaics if they are downloaded later)."""
     src = _euclid_mosaic(tile, band)
     if src is None:
-        return None, None, None          # band genuinely absent
+        return None, None, None, None    # band genuinely absent
     t0 = time.time()
     with fits.open(src) as h:
         hdr = _strip_structural(h[0].header)
@@ -252,7 +283,7 @@ def load_euclid_nsci(tile: str, band: str, sigma_px: float):
     n_cov = int(cov.sum())
     if n_cov < 1000:                     # empty NISP tile edge case
         print(f'    {band:7s} coverage {n_cov} px — skipped', flush=True)
-        return None, None, None
+        return None, None, None, None
     np.nan_to_num(sci, copy=False)
     if sigma_px > 0.1:
         sci = gaussian_filter(sci, sigma_px, mode='constant', cval=0)
@@ -261,14 +292,14 @@ def load_euclid_nsci(tile: str, band: str, sigma_px: float):
     sigma = float(1.4826 * np.median(np.abs(samp - med)))
     if sigma <= 0:
         print(f'    {band:7s} σ_rob=0 — skipped', flush=True)
-        return None, None, None
+        return None, None, None, None
     sci /= sigma
     sci[~cov] = 0
     print(f'    {band:7s} shape {sci.shape}  σ_k={sigma_px:.2f} px '
           f'σ_rob={sigma:.4g}  cov={n_cov/cov.size:.1%}  '
           f'({time.time()-t0:.0f}s)', flush=True)
     return sci, hdr, dict(noise='robust_sigma', sigma_robust=sigma,
-                          coverage_frac=round(n_cov / cov.size, 4))
+                          coverage_frac=round(n_cov / cov.size, 4)), cov
 
 
 LOADERS = {'jwst': load_jwst_nsci, 'hst': load_hst_nsci,
@@ -276,12 +307,13 @@ LOADERS = {'jwst': load_jwst_nsci, 'hst': load_hst_nsci,
 
 
 # ----------------------------------------------------------------------
-# χ²₊ stack
+# χ₊ stack
 # ----------------------------------------------------------------------
 def build_chi2(mission: str, tile: str, work: Path,
-               force: bool) -> tuple[Path, dict]:
+               force: bool) -> tuple[Path, Path, dict]:
     spec = MISSIONS[mission]
     chi2_path = work / f'chi2_{tile}.fits'
+    wht_path = work / f'chi2_{tile}.wht.fits'
     meta_path = work / f'chi2_{tile}.meta.json'
 
     fwhms = {}
@@ -292,20 +324,23 @@ def build_chi2(mission: str, tile: str, work: Path,
 
     want = dict(mission=mission, tile=tile, bands=spec['bands'],
                 target=spec['target'], fwhms=fwhms, cutout=0,
-                statistic='chi_plus = sqrt(mean positive square)',
+                statistic=('signed_snr_single_band' if spec['single_band']
+                           else 'chi_plus = sqrt(sum/ncov per pixel)'),
                 recipe_version=RECIPE_VERSION)
-    if chi2_path.exists() and meta_path.exists() and not force:
+    if (chi2_path.exists() and wht_path.exists() and meta_path.exists()
+            and not force):
         try:
             have = json.loads(meta_path.read_text())
         except (OSError, json.JSONDecodeError):
             have = {}
         if {k: have.get(k) for k in want} == want:
             print(f'  reusing {chi2_path.name} (meta matches)')
-            return chi2_path, have
+            return chi2_path, wht_path, have
         print(f'  existing {chi2_path.name} meta MISMATCH — rebuilding')
 
-    chi2 = None          # positive stack (full frame)
-    neg = None           # negative stack (central QA window)
+    chi2 = None          # positive sum-of-squares (multi) | signed nsci (single)
+    neg = None           # negative sum-of-squares, QA window (multi only)
+    ncov = None          # per-pixel band count (uint8)
     win = None
     ref_hdr = None
     band_info = {}
@@ -313,7 +348,7 @@ def build_chi2(mission: str, tile: str, work: Path,
     for b in spec['bands']:
         sigma_px = kernel_sigma_px(fwhms[b]['fwhm_arcsec'], fwhm_tgt,
                                    spec['pixscale'])
-        nsci, hdr, info = LOADERS[mission](tile, b, sigma_px)
+        nsci, hdr, info, cov = LOADERS[mission](tile, b, sigma_px)
         if nsci is None:
             band_info[b] = dict(used=False)
             continue
@@ -326,11 +361,19 @@ def build_chi2(mission: str, tile: str, work: Path,
             wy, wx = min(NEGQA_WINDOW, ny), min(NEGQA_WINDOW, nx)
             win = (slice((ny - wy)//2, (ny - wy)//2 + wy),
                    slice((nx - wx)//2, (nx - wx)//2 + wx))
-        # negative half of the QA window, BEFORE truncation
+        if spec['single_band']:
+            chi2, ref_hdr = nsci, hdr
+            ncov = cov.astype(np.uint8)
+            break
+        # multi-band: accumulate coverage + neg window + positive stack
+        if ncov is None:
+            ncov = cov.astype(np.uint8)
+        else:
+            ncov += cov
+        del cov
         nw = np.minimum(nsci[win], 0).astype(np.float32)
         np.square(nw, out=nw)
         neg = nw if neg is None else neg + nw
-        # positive full-frame stack
         np.maximum(nsci, 0, out=nsci)
         np.square(nsci, out=nsci)
         if chi2 is None:
@@ -343,11 +386,21 @@ def build_chi2(mission: str, tile: str, work: Path,
             del nsci
     if chi2 is None:
         sys.exit(f'{mission}/{tile}: no usable band')
-    n_used = np.float32(len(used))
-    chi2 /= n_used
-    np.sqrt(chi2, out=chi2)
-    neg /= n_used
-    np.sqrt(neg, out=neg)
+
+    if spec['single_band']:
+        pos_win = np.ascontiguousarray(chi2[win])
+        neg_win = -pos_win
+    else:
+        denom = np.maximum(ncov, 1).astype(np.float32)
+        chi2 /= denom
+        np.sqrt(chi2, out=chi2)
+        chi2[ncov == 0] = 0
+        neg /= denom[win]
+        np.sqrt(neg, out=neg)
+        neg[ncov[win] == 0] = 0
+        del denom
+        pos_win = np.ascontiguousarray(chi2[win])
+        neg_win = neg
     print(f'  χ₊ bands used: {used}   '
           f'med {np.median(chi2):.3g}  max {chi2.max():.3g}')
 
@@ -357,28 +410,43 @@ def build_chi2(mission: str, tile: str, work: Path,
             h.header[k] = v
         except Exception:
             pass
-    h.header['BUNIT'] = ('chi+', 'sqrt of mean positive square (Szalay+99)')
-    h.header['HISTORY'] = f'chi+ stack: {"+".join(used)}'
+    if spec['single_band']:
+        h.header['BUNIT'] = ('snr', 'signed noise-equalized single band')
+    else:
+        h.header['BUNIT'] = ('chi+', 'sqrt mean positive square (Szalay+99)')
+    h.header['HISTORY'] = f'chi+ stack: {"+".join(used)} (recipe v{RECIPE_VERSION})'
     h.header['HISTORY'] = (f'homogenized to {spec["target"]} '
                            f'FWHM={fwhm_tgt}"')
     h.writeto(chi2_path, overwrite=True)
-    print(f'  [save] {chi2_path}  ({chi2_path.stat().st_size/1e9:.2f} GB)')
-
-    negqa = run_negqa(mission, tile, work, chi2[win], neg)
+    cov_frac = float((ncov > 0).mean())
+    fits.PrimaryHDU(data=(ncov > 0).astype(np.uint8)).writeto(
+        wht_path, overwrite=True)
+    print(f'  [save] {chi2_path.name} '
+          f'({chi2_path.stat().st_size/1e9:.2f} GB)  '
+          f'+ {wht_path.name} (cov {cov_frac:.1%})')
     del chi2
 
+    wht_win = work / f'_negqa_wht_{tile}.fits'
+    fits.PrimaryHDU(data=np.ascontiguousarray(
+        (ncov[win] > 0).astype(np.uint8))).writeto(wht_win, overwrite=True)
+    del ncov
+    negqa = run_negqa(mission, tile, work, pos_win, neg_win, wht_win)
+    wht_win.unlink()
+
     meta = dict(want, bands_used=used, band_info=band_info, negqa=negqa,
+                coverage_frac=round(cov_frac, 4),
                 created_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))
     meta_path.write_text(json.dumps(meta, indent=2))
-    return chi2_path, meta
+    return chi2_path, wht_path, meta
 
 
-def run_negqa(mission: str, tile: str, work: Path,
-              pos_win: np.ndarray, neg_win: np.ndarray) -> dict:
+def run_negqa(mission: str, tile: str, work: Path, pos_win: np.ndarray,
+              neg_win: np.ndarray, wht_win: Path) -> dict:
     """Per-tile spurious-detection QA: run the cold and hot passes on the
-    positive and negative chi windows; the negative image contains only
-    (correlated) noise + artifacts, so n_neg/n_pos estimates the spurious
-    fraction at the current thresholds."""
+    positive and negative chi windows (sign-flipped image for single-band
+    missions); the negative image contains only (correlated) noise +
+    artifacts, so n_neg/n_pos estimates the spurious fraction at the
+    current thresholds."""
     spec = MISSIONS[mission]
     seeing = empirical_fwhm_arcsec(mission, tile, spec['target'])[0]
     out = dict(window_px=list(pos_win.shape),
@@ -390,7 +458,7 @@ def run_negqa(mission: str, tile: str, work: Path,
         for mode in ('cold', 'hot'):
             cat = work / f'_negqa_{tag}_{mode}_{tile}.fits'
             run_sex_mode(f, mode, work, tile, spec['pixscale'], seeing,
-                         hot_thresh=spec['hot_thresh'],
+                         weight=wht_win, hot_thresh=spec['hot_thresh'],
                          cat_override=cat, seg=False, quiet=True)
             out[f'n_{tag}_{mode}'] = len(fits.open(cat)[2].data)
             cat.unlink()
@@ -411,6 +479,7 @@ def run_negqa(mission: str, tile: str, work: Path,
 # ----------------------------------------------------------------------
 def run_sex_mode(image: Path, mode: str, work: Path, tile: str,
                  pixscale: float, seeing: float,
+                 weight: Path | None = None,
                  hot_thresh: float | None = None,
                  cat_override: Path | None = None,
                  seg: bool = True, quiet: bool = False) -> Path:
@@ -427,6 +496,9 @@ def run_sex_mode(image: Path, mode: str, work: Path, tile: str,
            '-PIXEL_SCALE',     f'{pixscale:.4f}',
            '-SEEING_FWHM',     f'{seeing:.4f}',
            ]
+    if weight is not None:
+        cmd += ['-WEIGHT_TYPE', 'MAP_WEIGHT',
+                '-WEIGHT_IMAGE', str(weight)]
     if seg:
         cmd += ['-CHECKIMAGE_NAME', str(work / f'seg_{mode}_{tile}.fits')]
     else:
@@ -519,8 +591,6 @@ def parse_args():
                    help='A1..B10 (jwst/hst) or MER tile id (euclid)')
     p.add_argument('--force', action='store_true',
                    help='rebuild even if detect meta exists')
-    p.add_argument('--skip-stack', action='store_true',
-                   help='reuse existing chi2 image regardless of meta (debug)')
     return p.parse_args()
 
 
@@ -540,24 +610,20 @@ def main():
     print(f'mission {args.mission}   tile {args.tile}   workdir {work}')
     t0 = time.time()
 
-    step('1. χ²₊ detection image')
-    if args.skip_stack and (work / f'chi2_{args.tile}.fits').exists():
-        chi2_path = work / f'chi2_{args.tile}.fits'
-        chi2_meta = {}
-    else:
-        chi2_path, chi2_meta = build_chi2(args.mission, args.tile, work,
-                                          args.force)
+    step('1. χ₊ detection image')
+    chi2_path, wht_path, chi2_meta = build_chi2(args.mission, args.tile,
+                                                work, args.force)
     t_stack = time.time()
 
     seeing = empirical_fwhm_arcsec(args.mission, args.tile,
                                    spec['target'])[0]
     step('2. SExtractor cold pass')
     cold_cat = run_sex_mode(chi2_path, 'cold', work, args.tile,
-                            spec['pixscale'], seeing)
+                            spec['pixscale'], seeing, weight=wht_path)
     t_cold = time.time()
     step('3. SExtractor hot pass')
     hot_cat = run_sex_mode(chi2_path, 'hot', work, args.tile,
-                           spec['pixscale'], seeing,
+                           spec['pixscale'], seeing, weight=wht_path,
                            hot_thresh=spec['hot_thresh'])
     t_hot = time.time()
 
@@ -570,6 +636,7 @@ def main():
         mission=args.mission, tile=args.tile,
         n_cold=n_cold, n_hot_kept=n_hot_kept, n_total=n_total,
         hot_thresh=spec['hot_thresh'] or 3.0,
+        recipe_version=RECIPE_VERSION,
         seeing_fwhm_arcsec=round(seeing, 4),
         stack_s=round(t_stack - t0, 1), cold_s=round(t_cold - t_stack, 1),
         hot_s=round(t_hot - t_cold, 1), merge_s=round(t_end - t_hot, 1),
