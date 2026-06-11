@@ -1,4 +1,8 @@
-# SExtractor config — PS1 DR1 r.  Sibling of ps1_g.sex.
+# SExtractor config — Pan-STARRS1 DR1 rings.v3 skycell stack, r band.
+# 0.25"/px, seeing ~1.0-1.3"; image un-asinh-scaled to LINEAR counts by the
+# builder; ZP = 25 + 2.5log10(EXPTIME) overridden per cell at runtime.
+# GAIN 0: stack counts, sky-noise-dominated error model (validated WEIGHT
+# NONE ground recipe); saturation via the mask SAT bit in the builder.
 
 CATALOG_TYPE     FITS_LDAC
 PARAMETERS_NAME  default.param
@@ -13,18 +17,18 @@ DEBLEND_MINCONT  0.005
 CLEAN            Y
 CLEAN_PARAM      1.0
 MASK_TYPE        CORRECT
-WEIGHT_TYPE      MAP_WEIGHT
+WEIGHT_TYPE      NONE
 WEIGHT_THRESH    0
-WEIGHT_GAIN      Y
-PHOT_APERTURES   8,12,20
+WEIGHT_GAIN      N
+PHOT_APERTURES   12,18,30
 PHOT_AUTOPARAMS  2.5,3.5
 PHOT_PETROPARAMS 2.0,3.5
-SATUR_LEVEL      1.0e10
+SATUR_LEVEL      1e9
 MAG_ZEROPOINT    25.0
 MAG_GAMMA        4.0
-GAIN             1.0
-PIXEL_SCALE      0.250
-SEEING_FWHM      1.1
+GAIN             0.0
+PIXEL_SCALE      0.25
+SEEING_FWHM      1.2
 STARNNW_NAME     default.nnw
 BACK_SIZE        64
 BACK_FILTERSIZE  3

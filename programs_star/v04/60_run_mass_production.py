@@ -50,7 +50,7 @@ HSC_BANDS  = ['g', 'r', 'i', 'z', 'y']                         # tract-9813 griz
 # tolerate more.  HSC deepCoadd patches are 4200² (modest) but each build
 # writes a ~70 MB cleaned-image copy, so keep it middling.
 DEFAULT_JOBS = {'jwst': 3, 'hst': 3, 'euclid': 6, 'euclid_nisp': 6, 'hsc': 4,
-                'lsdr10': 4}
+                'lsdr10': 4, 'ps1': 4, 'sdss': 6}
 
 # big per-tile intermediates to delete once the model + plots + meta exist,
 # so a 160-tile run doesn't pile up ~1 TB on the scratch disk.  Kept: the .psf
@@ -76,6 +76,32 @@ def nisp_tiles():
 
 
 LS_COADD = Path('/Volumes/exdisk1/data/DESI_Legacy/COSMOS/dr10/south/coadd')
+PS1_SKY  = Path('/Volumes/exdisk1/data/PanStarrs/COSMOS/skycells/rings.v3.skycell')
+
+
+SDSS_FRAMES = Path('/Volumes/exdisk1/data/SDSS/COSMOS/frames')
+
+
+def sdss_avail():
+    """Set of (frame, band) SDSS corrected frames on disk; frame = run6-camcol-field4."""
+    avail = set()
+    for f in SDSS_FRAMES.glob('*/*/*/frame-*.fits.bz2'):
+        if f.name.startswith('._'):
+            continue
+        parts = f.name.replace('.fits.bz2', '').split('-')   # frame,b,run6,camcol,field4
+        avail.add((f'{parts[2]}-{parts[3]}-{parts[4]}', parts[1]))
+    return avail
+
+
+def ps1_avail():
+    """Set of (cell, band) PS1 stack images on disk; cell = proj_sub."""
+    avail = set()
+    for f in PS1_SKY.glob('*/*/rings.v3.skycell.*.stk.*.unconv.fits'):
+        if f.name.startswith('._'):
+            continue
+        parts = f.name.split('.')
+        avail.add((f'{parts[3]}_{parts[4]}', parts[6]))
+    return avail
 
 
 def lsdr10_avail():
@@ -173,6 +199,32 @@ def build_worklist(missions):
                            '--brick', brick, '--filter', b],
                 plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
                           '--instrument', inst, '--tile', brick]))
+    if 'ps1' in missions:
+        # PS1 rings.v3 skycells (36 over the VIS scope) × grizy; --reuse-pass1
+        # so the pooled-saturation pre-pass catalogs (64_ps1) are not redone.
+        for cell, b in sorted(ps1_avail()):
+            inst = f'ps1_{b}'
+            meta = WORK / inst / cell / 'psf' / f'psf_{cell}.meta.json'
+            items.append(dict(
+                mission='ps1', instrument=inst, tile=cell, band=b, suffix=cell,
+                meta=meta,
+                build_cmd=[PY, str(HERE / '54_step3a_build_psf_model_ps1.py'),
+                           '--cell', cell, '--filter', b, '--reuse-pass1'],
+                plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
+                          '--instrument', inst, '--tile', cell]))
+    if 'sdss' in missions:
+        # SDSS DR17 corrected frames (158 over the VIS scope) × ugriz;
+        # --reuse-pass1 so the 64_sdss pooled pre-pass catalogs are not redone.
+        for frame, b in sorted(sdss_avail()):
+            inst = f'sdss_{b}'
+            meta = WORK / inst / frame / 'psf' / f'psf_{frame}.meta.json'
+            items.append(dict(
+                mission='sdss', instrument=inst, tile=frame, band=b, suffix=frame,
+                meta=meta,
+                build_cmd=[PY, str(HERE / '54_step3a_build_psf_model_sdss.py'),
+                           '--frame', frame, '--filter', b, '--reuse-pass1'],
+                plot_cmd=[PY, str(HERE / '56_make_psf_qa_plots_single.py'),
+                          '--instrument', inst, '--tile', frame]))
     return items
 
 
@@ -257,7 +309,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--missions', default='jwst,hst,euclid',
-                   help='comma list of jwst,hst,euclid,euclid_nisp,hsc,lsdr10')
+                   help='comma list of jwst,hst,euclid,euclid_nisp,hsc,lsdr10,ps1')
     p.add_argument('--jobs', type=int, default=None,
                    help='override per-mission concurrency for all missions')
     p.add_argument('--force', action='store_true', help='reprocess even if done')

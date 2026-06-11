@@ -1,4 +1,8 @@
-# SExtractor config — SDSS DR17 i.  Sibling of sdss_u.sex.
+# SExtractor config — SDSS DR17 corrected frame, i band.
+# 0.396"/px, seeing ~1.1-1.5"; HDU0 = sky-subtracted nanomaggies (ZP=22.5
+# exact).  GAIN 0: calibrated flux units, sky-noise-dominated error model
+# (validated WEIGHT NONE ground recipe).  No mask plane: saturation via the
+# pooled global onset in the builder.
 
 CATALOG_TYPE     FITS_LDAC
 PARAMETERS_NAME  default.param
@@ -14,15 +18,17 @@ CLEAN            Y
 CLEAN_PARAM      1.0
 MASK_TYPE        CORRECT
 WEIGHT_TYPE      NONE
-PHOT_APERTURES   5,8,13
+WEIGHT_THRESH    0
+WEIGHT_GAIN      N
+PHOT_APERTURES   12,18,30
 PHOT_AUTOPARAMS  2.5,3.5
 PHOT_PETROPARAMS 2.0,3.5
-SATUR_LEVEL      30000.0
+SATUR_LEVEL      1e9
 MAG_ZEROPOINT    22.5
 MAG_GAMMA        4.0
-GAIN             5.0
+GAIN             0.0
 PIXEL_SCALE      0.396
-SEEING_FWHM      1.1
+SEEING_FWHM      1.3
 STARNNW_NAME     default.nnw
 BACK_SIZE        64
 BACK_FILTERSIZE  3

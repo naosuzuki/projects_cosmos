@@ -58,6 +58,16 @@ BANDS = [
     ('LS-r',   'LS DR10 r (DECam)',      'lsdr10_r'),
     ('LS-i',   'LS DR10 i (DECam)',      'lsdr10_i'),
     ('LS-z',   'LS DR10 z (DECam)',      'lsdr10_z'),
+    ('PS1-g',  'PS1 g (rings.v3 stack)', 'ps1_g'),
+    ('PS1-r',  'PS1 r (rings.v3 stack)', 'ps1_r'),
+    ('PS1-i',  'PS1 i (rings.v3 stack)', 'ps1_i'),
+    ('PS1-z',  'PS1 z (rings.v3 stack)', 'ps1_z'),
+    ('PS1-y',  'PS1 y (rings.v3 stack)', 'ps1_y'),
+    ('SDSS-u', 'SDSS u (DR17 frame)',    'sdss_u'),
+    ('SDSS-g', 'SDSS g (DR17 frame)',    'sdss_g'),
+    ('SDSS-r', 'SDSS r (DR17 frame)',    'sdss_r'),
+    ('SDSS-i', 'SDSS i (DR17 frame)',    'sdss_i'),
+    ('SDSS-z', 'SDSS z (DR17 frame)',    'sdss_z'),
 ]
 
 # canonical plot filenames (after symlinking into the site)

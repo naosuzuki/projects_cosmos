@@ -92,6 +92,19 @@ INSTRUMENTS = {
     'lsdr10_r': {'pix': 0.262, 'psfex': 'psfex_hsc.psfex', 'label': 'LS DR10 r'},
     'lsdr10_i': {'pix': 0.262, 'psfex': 'psfex_hsc.psfex', 'label': 'LS DR10 i'},
     'lsdr10_z': {'pix': 0.262, 'psfex': 'psfex_hsc.psfex', 'label': 'LS DR10 z'},
+    # Pan-STARRS1 DR1 rings.v3 skycell stacks, 0.25"/px — same ~4-5 px FWHM
+    # sampling regime as HSC/LS → reuses the HSC PSFEx config.
+    'ps1_g': {'pix': 0.25, 'psfex': 'psfex_hsc.psfex', 'label': 'PS1 g'},
+    'ps1_r': {'pix': 0.25, 'psfex': 'psfex_hsc.psfex', 'label': 'PS1 r'},
+    'ps1_i': {'pix': 0.25, 'psfex': 'psfex_hsc.psfex', 'label': 'PS1 i'},
+    'ps1_z': {'pix': 0.25, 'psfex': 'psfex_hsc.psfex', 'label': 'PS1 z'},
+    'ps1_y': {'pix': 0.25, 'psfex': 'psfex_hsc.psfex', 'label': 'PS1 y'},
+    # SDSS DR17 corrected frames, 0.396"/px (seeing ~1.3" → FWHM ~3.3 px).
+    'sdss_u': {'pix': 0.396, 'psfex': 'psfex_hsc.psfex', 'label': 'SDSS u'},
+    'sdss_g': {'pix': 0.396, 'psfex': 'psfex_hsc.psfex', 'label': 'SDSS g'},
+    'sdss_r': {'pix': 0.396, 'psfex': 'psfex_hsc.psfex', 'label': 'SDSS r'},
+    'sdss_i': {'pix': 0.396, 'psfex': 'psfex_hsc.psfex', 'label': 'SDSS i'},
+    'sdss_z': {'pix': 0.396, 'psfex': 'psfex_hsc.psfex', 'label': 'SDSS z'},
 }
 PIX        = 0.10      # arcsec/pixel — overwritten per-instrument in main()
 _PSFEX_CFG = 'psfex_euclid_vis.psfex'  # overwritten per-instrument in main()
@@ -902,8 +915,18 @@ def main():
     import json as _json
     _m = _json.loads((psf_dir / f'psf_{band}.meta.json').read_text())
     _scf = _m.get('sci_source_file'); _sce = int(_m.get('sci_source_ext', 0))
-    sci = (fits.getdata(_scf, ext=_sce) if _scf
-           else fits.getdata(psf_dir / f'sci_{band}.fits')).astype(np.float32)
+    if _scf:
+        with fits.open(_scf) as _sh:
+            sci = _sh[_sce].data.astype(np.float64)
+            _shd = _sh[_sce].header
+        # PS1 stacks are asinh-scaled (BSOFTEN/BOFFSET) — un-scale to linear
+        # so peak counts match the builder's saturation measurement.
+        if 'BSOFTEN' in _shd and 'BOFFSET' in _shd:
+            sci = (_shd['BOFFSET'] + _shd['BSOFTEN'] * 2.0
+                   * np.sinh(0.4 * np.log(10.0) * sci))
+        sci = np.nan_to_num(sci.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    else:
+        sci = fits.getdata(psf_dir / f'sci_{band}.fits').astype(np.float32)
     print(f'  SCI shape: {sci.shape}')
     peak, ncoremask = compute_peak_and_ncoremask(sci, xx, yy, half=2)
     print(f'  masked-core sources: {(ncoremask>0).sum()}')

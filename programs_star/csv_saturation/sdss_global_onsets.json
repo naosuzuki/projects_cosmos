@@ -1,0 +1,43 @@
+{
+  "created_utc_iso": "2026-06-11T00:35:57Z",
+  "method": "pooled Gaia-anchored peak turnover (G axis) + band-G color + p95 saturated-star MAG_AUTO slide margin (= LS method)",
+  "bands": {
+    "u": {
+      "sat_onset_mag": null,
+      "n_cells_pooled": 24,
+      "n_gaia_pooled": 1502
+    },
+    "g": {
+      "sat_onset_mag": 16.53,
+      "gaia_G_onset": 13.75,
+      "color_band_minus_G": 0.564,
+      "slide_p95": 2.213,
+      "n_cells_pooled": 24,
+      "n_gaia_pooled": 3225
+    },
+    "r": {
+      "sat_onset_mag": 16.8,
+      "gaia_G_onset": 14.25,
+      "color_band_minus_G": 0.016,
+      "slide_p95": 2.53,
+      "n_cells_pooled": 24,
+      "n_gaia_pooled": 3380
+    },
+    "i": {
+      "sat_onset_mag": 16.34,
+      "gaia_G_onset": 14.25,
+      "color_band_minus_G": -0.212,
+      "slide_p95": 2.302,
+      "n_cells_pooled": 24,
+      "n_gaia_pooled": 3377
+    },
+    "z": {
+      "sat_onset_mag": 14.24,
+      "gaia_G_onset": 12.25,
+      "color_band_minus_G": -0.212,
+      "slide_p95": 2.2,
+      "n_cells_pooled": 24,
+      "n_gaia_pooled": 3200
+    }
+  }
+}
