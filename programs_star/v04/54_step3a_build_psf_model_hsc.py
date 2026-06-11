@@ -285,8 +285,18 @@ def main():
             if ss <= 0:
                 break
             kp = (rr > -3.5 * ss) & (rr < 3.0 * ss)     # tighter above (galaxies)
-        slope = float(np.clip(bb[0], -0.08, 0.02))      # sane ground slope px/mag
-        icpt, mad_t, tilted = float(bb[1]), max(float(ss), 0.030), True
+        slope_fit = float(bb[0])
+        slope = float(np.clip(slope_fit, -0.08, 0.02))  # sane ground slope px/mag
+        if slope != slope_fit:
+            # a clamped slope invalidates the JOINTLY-fit intercept (the line
+            # would shift off the data); refit intercept + scatter at the
+            # clamped slope.
+            icpt = float(np.median(tf[kp] - slope * tm[kp]))
+            rr2 = tf - (slope * tm + icpt)
+            ss = 1.4826 * float(np.median(np.abs(rr2[kp] - np.median(rr2[kp]))))
+        else:
+            icpt = float(bb[1])
+        mad_t, tilted = max(float(ss), 0.030), True
     locus_of = lambda mm: slope * np.asarray(mm, float) + icpt
 
     # FR band: parallel tilted rails (bright end relaxed for the anchor override)

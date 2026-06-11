@@ -245,8 +245,18 @@ def main():
             if ss <= 0:
                 break
             kp = np.abs(rr) < 3.5 * ss
-        slope = float(np.clip(bb[0], -0.08, 0.02))
-        icpt, mad_t, tilted = float(bb[1]), max(float(ss), 0.030), True
+        slope_fit = float(bb[0])
+        slope = float(np.clip(slope_fit, -0.08, 0.02))
+        if slope != slope_fit:
+            # a clamped slope invalidates the JOINTLY-fit intercept (the line
+            # would shift off the data, e.g. rails at 4-8 px against a 1.7 px
+            # locus -> 0 stars); refit intercept + scatter at the clamped slope.
+            icpt = float(np.median(tf[kp] - slope * tm[kp]))
+            rr2 = tf - (slope * tm + icpt)
+            ss = 1.4826 * float(np.median(np.abs(rr2[kp] - np.median(rr2[kp]))))
+        else:
+            icpt = float(bb[1])
+        mad_t, tilted = max(float(ss), 0.030), True
     locus_of = lambda mm: slope * np.asarray(mm, float) + icpt
 
     # ── MEASURED purity faint limit ──
@@ -278,6 +288,18 @@ def main():
     star = ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
             & keep_fr & e_round & pure_arr
             & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
+    # self-consistency guard: on the tiny SDSS frames a single noisy 8-object
+    # probe bin can fake a bright "galaxy departure" (e.g. purity 17.5 with a
+    # 16.3 bright limit -> ~1-mag window -> 0 stars).  A purity limit that
+    # EMPTIES the sample is self-evidently wrong: drop it and reselect.
+    if pure_to is not None and int(star.sum()) < 10:
+        print(f'  [guard] purity {pure_to:.1f} leaves only {int(star.sum())} '
+              f'stars — dropping the purity cut (probe-bin fluke)')
+        pure_to = None
+        pure_arr = np.ones(len(obj), bool)
+        star = ((cs > 0.8) & (snr > a.snr_min) & (elon < 1.5) & (fwhm > fwhm_min)
+                & keep_fr & e_round
+                & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
     print(f'  PSF stars selected : {star.sum()}   '
           f'(saturated excl {saturated.sum()}, '
           f'isolation (any nbr <{a.nbr_fwhm:.1f}xFWHM={R_nbr*PIXSCALE:.2f}\") '
