@@ -215,6 +215,12 @@ def write_css():
         table.tiles tbody td.tile-name img.tilemap:hover {
           box-shadow:0 0 0 2px #4a90e2;
         }
+        .tm-lightbox { display:none; position:fixed; inset:0; z-index:1000;
+          cursor:zoom-out; background:rgba(0,0,0,0.82);
+          align-items:center; justify-content:center; }
+        .tm-lightbox img { max-width:88vw; max-height:88vh; background:#fff;
+          padding:6px; border:2px solid #fff; border-radius:6px;
+          box-shadow:0 6px 30px rgba(0,0,0,0.5); }
         table.tiles tbody td.panel { width: 14%; }
         /* Uniform thumbnail box: fixed aspect-ratio container,
            images scaled with object-fit:contain so all panels render
@@ -397,9 +403,8 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
             else:
                 cells.append(f'<td class="empty">—</td>')
         tm = tilemap_rel(instrument, tile)
-        tm_html = (f'<br><a href="{tm}" target="_blank">'
-                   f'<img class="tilemap" src="{tm}" alt="{tile} sky location"></a>'
-                   if tm else '')
+        tm_html = (f'<br><img class="tilemap" src="{tm}" '
+                   f'alt="{tile} sky location">' if tm else '')
         rows.append(f'<tr><td class="tile-name">{tile}{tm_html}</td>{"".join(cells)}</tr>')
 
     if not rows:
@@ -428,6 +433,20 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
             </tbody>
           </table>
         </div>
+        <div id="tmlb" class="tm-lightbox" onclick="this.style.display='none'">
+          <img id="tmlbimg" alt="tile location (enlarged)">
+        </div>
+        <script>
+          document.querySelectorAll('img.tilemap').forEach(function(im){{
+            im.addEventListener('click', function(){{
+              document.getElementById('tmlbimg').src = this.src;
+              document.getElementById('tmlb').style.display = 'flex';
+            }});
+          }});
+          document.addEventListener('keydown', function(e){{
+            if (e.key === 'Escape') document.getElementById('tmlb').style.display = 'none';
+          }});
+        </script>
         </body></html>
     ''').strip()
     (HTML_DIR / f'{band}.html').write_text(html)
