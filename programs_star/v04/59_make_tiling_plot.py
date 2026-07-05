@@ -149,14 +149,61 @@ def built_tiles(metas, prefixes):
     return out
 
 
+def make_tilemaps(cache, force=False):
+    """Per-(survey grid, tile) mini map for the band pages' Tile column
+    (their fig_tilemaps.py pattern): JWST A/B reference grid faint, all of
+    this survey's tiles as thin outlines, THIS tile filled.  Written to
+    html/psf_qa/tilemaps/<grid_instrument>__<tile>.png; bands of one survey
+    share a grid so 55_ maps e.g. hsc_r -> hsc_g's maps."""
+    outdir = OUT_PNG.parent / 'tilemaps'
+    outdir.mkdir(parents=True, exist_ok=True)
+    ref = [np.asarray(v['corners']) for v in cache.get(REF_INSTRUMENT, {}).values()]
+    allc = np.vstack([np.asarray(v['corners'])
+                      for inst in cache.values() for v in inst.values()])
+    ramin, ramax = allc[:, 0].min() - 0.1, allc[:, 0].max() + 0.1
+    dmin, dmax = allc[:, 1].min() - 0.1, allc[:, 1].max() + 0.1
+    n = 0
+    for _, _, src_list, col, _ in PANELS:
+        grid = src_list[0]
+        tiles = {t: np.asarray(v['corners']) for t, v in cache.get(grid, {}).items()}
+        for tile, fp in tiles.items():
+            png = outdir / f'{grid}__{tile}.png'
+            if png.exists() and not force:
+                continue
+            fig, ax = plt.subplots(figsize=(2.3, 2.3))
+            for p in ref:
+                ax.add_patch(Polygon(p, closed=True, fill=False, ec='0.85', lw=0.4))
+            for p2 in tiles.values():
+                ax.add_patch(Polygon(p2, closed=True, fill=False, ec=col,
+                                     lw=0.6, alpha=0.55))
+            ax.add_patch(Polygon(fp, closed=True, facecolor=col, alpha=0.55,
+                                 ec=col, lw=1.6))
+            ax.set_xlim(ramax, ramin)
+            ax.set_ylim(dmin, dmax)
+            ax.set_aspect('equal', 'box')
+            ax.set_xticks([]); ax.set_yticks([])
+            for s in ax.spines.values():
+                s.set_edgecolor('0.7')
+            fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
+            fig.savefig(png, dpi=220)
+            plt.close(fig)
+            n += 1
+    print(f'tilemaps: {n} written to {outdir}')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--refresh-cache', action='store_true')
+    ap.add_argument('--tilemaps', action='store_true',
+                    help='also render the per-tile mini maps for band pages')
+    ap.add_argument('--force-tilemaps', action='store_true')
     a = ap.parse_args()
     t0 = time.time()
 
     metas = load_metas()
     cache = build_cache(metas, a.refresh_cache)
+    if a.tilemaps or a.force_tilemaps:
+        make_tilemaps(cache, force=a.force_tilemaps)
 
     # Gaia context points
     gra = gdec = np.array([])

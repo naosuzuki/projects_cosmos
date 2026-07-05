@@ -207,6 +207,14 @@ def write_css():
         table.tiles tbody td.tile-name {
           font-weight:600; background:#f7f7f7; min-width:60px;
         }
+        table.tiles tbody td.tile-name img.tilemap {
+          display:block; width:104px; height:auto; margin:6px auto 0;
+          border:1px solid #e2e2e2; border-radius:4px; background:#fff;
+          cursor:zoom-in; transition:box-shadow .12s;
+        }
+        table.tiles tbody td.tile-name img.tilemap:hover {
+          box-shadow:0 0 0 2px #4a90e2;
+        }
         table.tiles tbody td.panel { width: 14%; }
         /* Uniform thumbnail box: fixed aspect-ratio container,
            images scaled with object-fit:contain so all panels render
@@ -347,6 +355,26 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
     return f'viewer/{band}/{tile}/{panel}.html'
 
 
+# band instrument → footprint-grid instrument whose tilemaps/ minimaps apply
+# (bands of one survey share the tile grid; keys match 59_'s PANELS sources)
+_TILEMAP_GRID = [
+    ('hst_acs_f814w', 'hst_acs_f814w'), ('jwst_nircam_', 'jwst_nircam_f115w'),
+    ('euclid_vis', 'euclid_vis'),       ('euclid_nisp_', 'euclid_nisp_y'),
+    ('hsc_', 'hsc_g'),                  ('lsdr10_', 'lsdr10_g'),
+    ('ps1_', 'ps1_g'),                  ('sdss_', 'sdss_r'),
+    ('unwise_', 'unwise_w1'),
+]
+
+
+def tilemap_rel(instrument: str, tile: str) -> str | None:
+    """Relative path of the tile's minimap (59_ --tilemaps), if rendered."""
+    for prefix, grid in _TILEMAP_GRID:
+        if instrument.startswith(prefix):
+            rel = f'tilemaps/{grid}__{tile}.png'
+            return rel if (HTML_DIR / rel).exists() else None
+    return None
+
+
 def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
     # build table header
     thead_panels = ''.join(f'<th>{title}</th>' for _, title in PANELS)
@@ -368,7 +396,11 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
                 )
             else:
                 cells.append(f'<td class="empty">—</td>')
-        rows.append(f'<tr><td class="tile-name">{tile}</td>{"".join(cells)}</tr>')
+        tm = tilemap_rel(instrument, tile)
+        tm_html = (f'<br><a href="{tm}" target="_blank">'
+                   f'<img class="tilemap" src="{tm}" alt="{tile} sky location"></a>'
+                   if tm else '')
+        rows.append(f'<tr><td class="tile-name">{tile}{tm_html}</td>{"".join(cells)}</tr>')
 
     if not rows:
         body_extra = '<p style="color:#888; font-style:italic;">No tiles processed yet for this band.</p>'
