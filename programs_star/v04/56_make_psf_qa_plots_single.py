@@ -131,6 +131,11 @@ def parse_args():
                         'letter-number such as A4)')
     p.add_argument('--reuse-outcat', action='store_true',
                    help='Skip re-running PSFEx if outcat already exists')
+    p.add_argument('--mosaics-only', action='store_true',
+                   help='Regenerate only psf_samples/psf_residuals (+_thumb) '
+                        'from kept files (outcat + stars LDAC + .psf + SCI); '
+                        'works on tiles whose pass1/check-image intermediates '
+                        'were cleaned by the mass driver')
     return p.parse_args()
 
 
@@ -590,6 +595,142 @@ def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
     plt.close(fig)
 
 
+def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
+                     mos, mag_mos, flg_mos, max_show=None):
+    """Sample + residual mosaics from RAW science cutouts at the model stars'
+    positions (projects_hsc/hostgalxy qa_plots.py recipe — reliable cell↔star
+    mapping, no PSFEx check-image files needed):
+      * samples : per-cell asinh (each stamp to its own peak) — true profile.
+      * residual: (data − PSFEx model)/peak in RdBu_r, FIXED ±5% of each star's
+                  peak (comparable across cells); amplitude + sub-pixel shift +
+                  background fitted out, so a clean star is ~white.
+    Fixed 20 columns.  Override-kept stars (FLAGS_PSF≠0: PSFEx flagged them,
+    the builder reinstated them as bright anchors) come FIRST with an orange
+    border + reason, then clean-accepted stars, brightest first.
+    Writes the full mosaics plus *_thumb.png (≤16 rows, no title) for the
+    band-page table."""
+    from scipy.ndimage import shift as ndshift, zoom
+
+    xs_ = np.asarray(mos['X_IMAGE'], float)
+    ys_ = np.asarray(mos['Y_IMAGE'], float)
+    flgpsf = np.asarray(mos['FLAGS_PSF'], int)
+    ovr = np.where(flgpsf != 0)[0]; ovr = ovr[np.argsort(mag_mos[ovr])]
+    cln = np.where(flgpsf == 0)[0]; cln = cln[np.argsort(mag_mos[cln])]
+    order = np.concatenate([ovr, cln]).astype(int)
+    if max_show is not None:
+        order = order[:max_show]
+
+    # PSF model: PSF_MASK polynomial from the builder's .psf, PSF_SAMP resample
+    pp = fits.open(psf_dir / f'stars_{suffix}.psf')[1]
+    hd = pp.header
+    mk = np.asarray(pp.data['PSF_MASK'][0], float)
+    deg = int(hd.get('POLDEG1', 0)); ps = hd['PSF_SAMP']
+    x0 = float(hd.get('POLZERO1', 0.0)); xsc = float(hd.get('POLSCAL1', 1.0))
+    y0 = float(hd.get('POLZERO2', 0.0)); ysc = float(hd.get('POLSCAL2', 1.0))
+    if mk.ndim == 2:                     # constant PSF stored as a bare 2D image
+        mk = mk[None, ...]
+
+    def psf_at(x, y):
+        dx = (x - x0) / xsc; dy = (y - y0) / ysc; t = []
+        for j in range(deg + 1):
+            for i in range(deg + 1 - j):
+                t.append(dx**i * dy**j)
+        p = np.tensordot(np.array(t), mk, axes=(0, 0))
+        if abs(ps - 1) > 1e-3:           # oversampled → resample to ODD native px
+            tgt = int(round(p.shape[0] * ps)) | 1
+            p = zoom(p, tgt / p.shape[0], order=3)
+        return p
+
+    ny, nx = sci.shape
+    H = psf_at(xs_[order[0]], ys_[order[0]]).shape[0] // 2
+    W = 2 * H + 1
+    yy_, xx_ = np.mgrid[-H:H+1, -H:H+1]
+    rad = np.hypot(xx_, yy_)
+    # fit/outer rings scaled to the stamp (their fixed 16/14 px assumes W≈45;
+    # small-stamp bands like unWISE PSF_SIZE=13 need proportional radii)
+    r_fit = min(16.0, H - 1.0)
+    fitm = rad < r_fit; outr = rad > min(14.0, 0.9 * H)
+    PER = 20
+    rows = (len(order) + PER - 1) // PER
+    SM = np.full((rows * W, PER * W), np.nan); RM = np.full_like(SM, np.nan)
+
+    def reason_word(v):
+        if   v & 1:  return 'neighbor'
+        elif v & 4:  return 'residual'
+        elif v & 8:  return 'elong'
+        elif v & 16: return 'low-snr'
+        return f'F={int(v)}'
+
+    cells = []                            # (r, c, num, mag, chi2, word|None)
+    for n, k in enumerate(order):
+        # SExtractor X/Y_IMAGE are 1-indexed; the numpy cutout is 0-indexed.
+        # (Verified on HST B5: the 1-px correction cuts max|resid| 2-5x.)
+        X, Y = xs_[k] - 1.0, ys_[k] - 1.0
+        xi, yi = int(round(X)), int(round(Y))
+        r, cc = n // PER, n % PER
+        word = reason_word(flgpsf[k]) if flgpsf[k] else None
+        if yi - H < 0 or xi - H < 0 or yi + H + 1 > ny or xi + H + 1 > nx:
+            cells.append((r, cc, n + 1, mag_mos[k], -1.0, word)); continue
+        c = np.nan_to_num(sci[yi-H:yi+H+1, xi-H:xi+H+1].astype(float))
+        P = ndshift(psf_at(X, Y), (Y - yi, X - xi), order=3)
+        gy, gx = np.gradient(P)
+        co = np.linalg.lstsq(
+            np.vstack([P[fitm], gx[fitm], gy[fitm], np.ones(fitm.sum())]).T,
+            c[fitm], rcond=None)[0]
+        Rres = c - (co[0]*P + co[1]*gx + co[2]*gy + co[3])
+        pk = max(float(np.nanmax(c - co[3])), 1e-9)
+        sig = 1.4826 * np.median(np.abs(Rres[outr] - np.median(Rres[outr]))) + 1e-9
+        chi2 = float(np.mean((Rres[fitm] / sig)**2))
+        sn = simple_norm(c, 'asinh', vmin=0,
+                         vmax=max(float(np.nanmax(c)), 1e-9), asinh_a=0.05)
+        SM[r*W:(r+1)*W, cc*W:(cc+1)*W] = np.clip(sn(c), 0, 1)
+        RM[r*W:(r+1)*W, cc*W:(cc+1)*W] = Rres / pk
+        cells.append((r, cc, n + 1, mag_mos[k], chi2, word))
+
+    n_ovr = int((flgpsf[order] != 0).sum())
+    fs_num, fs_lab = 13.0, 10.5
+    cap = (f'{n_ovr} override-kept (orange border + why PSFEx flagged it) first, '
+           f'then clean-accepted; brightest first; 20/row')
+
+    def _render(arr, png, cmap, vl, ttl, tc, nr, title=True):
+        fig, ax = plt.subplots(figsize=(PER * 1.1, nr * 1.1 + (1.2 if title else 0.2)))
+        ax.imshow(arr[:nr*W], cmap=cmap, vmin=vl[0], vmax=vl[1],
+                  origin='upper', extent=[0, PER, nr, 0])
+        for cl in range(PER + 1): ax.axvline(cl, color='cyan', lw=0.4, alpha=0.4)
+        for rl in range(nr + 1): ax.axhline(rl, color='cyan', lw=0.4, alpha=0.4)
+        for (r, cc, num, mg, chi2, word) in cells:
+            if r >= nr: continue
+            ax.text(cc + 0.04, r + 0.05, str(num), color=tc, fontsize=fs_num,
+                    fontweight='bold', va='top', family='serif')
+            ax.text(cc + 0.04, r + 0.96, f'm={mg:.1f}', color=tc,
+                    fontsize=fs_lab, va='bottom', family='serif')
+            if chi2 >= 0:
+                ax.text(cc + 0.96, r + 0.96, f'χ²={chi2:.0f}', color=tc,
+                        fontsize=fs_lab, va='bottom', ha='right', family='serif')
+            if word:
+                ax.add_patch(Rectangle((cc, r), 1, 1, fill=False,
+                                       edgecolor='orange', lw=1.8))
+                ax.text(cc + 0.04, r + 0.22, word, color='orange',
+                        fontsize=fs_lab, fontweight='bold', va='top',
+                        ha='left', family='serif')
+        ax.set_xticks([]); ax.set_yticks([])
+        if title:
+            ax.set_title(f'PSFEx {band_upper} — {ttl}.  {cap}', fontsize=12)
+        fig.tight_layout()
+        fig.savefig(png, dpi=90, facecolor='white')
+        plt.close(fig)
+
+    for arr, png, cmap, vl, ttl, tc in [
+            (SM, samp_png, 'gray', (0, 1), 'samples (per-cell asinh)', 'white'),
+            (RM, resi_png, 'RdBu_r', (-0.05, 0.05),
+             'residual (data−PSF)/peak ±5%', 'k')]:
+        png = Path(png)
+        thumb = png.with_name(png.stem + '_thumb' + png.suffix)
+        _render(arr, png, cmap, vl, ttl, tc, rows)                    # full (viewer)
+        _render(arr, thumb, cmap, vl, ttl, tc, min(16, rows), title=False)
+    return len(order), n_ovr
+
+
 def plot_psf_mosaics(out_samp_png, out_resi_png, samp, resi, ocd,
                      in_mosaic_idx, det_cat, band_upper,
                      n_accepted_total=None, crop_cell=None):
@@ -899,6 +1040,40 @@ def main():
     outcat = ensure_outcat(psf_dir, band, args.reuse_outcat)
     ocd = read_outcat(outcat)
 
+    # ── mosaics-only fast path: everything it needs survives the mass
+    #    driver's cleanup (outcat, stars_<band>.fits LDAC, stars_<band>.psf,
+    #    original SCI recorded in the meta) — pass1 is NOT required.
+    if args.mosaics_only:
+        import json as _json1
+        _m = _json1.loads(_mf.read_text())
+        _scf = _m.get('sci_source_file'); _sce = int(_m.get('sci_source_ext', 0))
+        if not _scf or not Path(_scf).exists():
+            sys.exit(f'mosaics-only: no readable sci_source_file in {_mf}')
+        with fits.open(_scf) as _sh:
+            sci = _sh[_sce].data.astype(np.float64)
+            _shd = _sh[_sce].header
+        if 'BSOFTEN' in _shd and 'BOFFSET' in _shd:      # PS1 asinh → linear
+            sci = (_shd['BOFFSET'] + _shd['BSOFTEN'] * 2.0
+                   * np.sinh(0.4 * np.log(10.0) * sci))
+        sci = np.nan_to_num(sci.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        stars = fits.open(psf_dir / f'stars_{band}.fits')[2].data
+        sx = np.asarray(stars['X_IMAGE'], float)
+        sy = np.asarray(stars['Y_IMAGE'], float)
+        smag = np.asarray(stars['MAG_AUTO'], float)
+        sflg = np.asarray(stars['FLAGS'], int)
+        mos = ocd[(np.asarray(ocd['FLAGS_PSF'], int) & 32) == 0]
+        mag_acc = np.zeros(len(mos)); flg_acc = np.zeros(len(mos), int)
+        for k in range(len(mos)):
+            j = ((sx - mos['X_IMAGE'][k])**2 + (sy - mos['Y_IMAGE'][k])**2).argmin()
+            mag_acc[k] = smag[j]; flg_acc[k] = sflg[j]
+        n_shown, n_ovr = plot_raw_mosaics(psf_dir / 'psf_samples.png',
+                                          psf_dir / 'psf_residuals.png',
+                                          psf_dir, sci, band_upper, band,
+                                          mos, mag_acc, flg_acc)
+        print(f'     psf_samples.png / psf_residuals.png (+_thumb)  '
+              f'(mosaics-only; {n_shown} cells, {n_ovr} override-kept)')
+        return
+
     # 2. read pass-1 detection catalog
     pass1 = fits.open(psf_dir / f'pass1_{band}.fits')[2].data
     mag = np.asarray(pass1['MAG_AUTO'], float)
@@ -965,27 +1140,14 @@ def main():
     tree = cKDTree(np.column_stack([xx, yy]))
     n_arr = neighbour_counts(xx, yy, tree, [1, 2, 3, 4, 5])
 
-    # 6. mosaic mapping (OUTCAT entries that pass input filter)
-    in_mosaic_mask = (ocd['FLAGS_PSF'] & 32) == 0
-    samp = fits.getdata(psf_dir / f'samp_stars_{band}.fits').astype(float)
-    resi = fits.getdata(psf_dir / f'resi_stars_{band}.fits').astype(float)
-    # Auto-detect the mosaic cell size (HST/SW=101, LW=151, Euclid VIS=51)
-    # the SAME way plot_psf_mosaics does — a hardcoded 101 would under-count
-    # the 51 px Euclid cells (truncating in_mosaic_idx to a fraction of the
-    # accepted stars) and over-count the 151 px LW cells.
-    csize = None
-    for candidate in (151, 101, 51):
-        if samp.shape[0] % candidate == 0 and samp.shape[1] % candidate == 0:
-            csize = candidate; break
-    if csize is None:
-        sys.exit(f'Cannot detect mosaic cell size from shape {samp.shape}')
-    nrow = samp.shape[0]//csize
-    ncol = samp.shape[1]//csize
-    n_filled = sum(np.any(samp[r*csize:(r+1)*csize, c*csize:(c+1)*csize] != 0)
-                   for r in range(nrow) for c in range(ncol))
-    in_mosaic_idx = np.where(in_mosaic_mask)[0][:n_filled]
-    print(f'  mosaic: {nrow}×{ncol} = {nrow*ncol},  filled={n_filled}, '
-          f'accepted={(ocd["FLAGS_PSF"][in_mosaic_idx]==0).sum()}')
+    # 6. mosaic mapping — every OUTCAT star except saturated-flagged (bit 32).
+    #    Raw-cutout mosaics (plot_raw_mosaics) rebuild stamps from the SCI +
+    #    stars_<suffix>.psf, so the PSFEx samp_/resi_ check-image files (which
+    #    the mass driver deletes) are no longer needed, and there is no PSFEx
+    #    grid capacity cap.
+    in_mosaic_idx = np.where((np.asarray(ocd['FLAGS_PSF'], int) & 32) == 0)[0]
+    print(f'  mosaic stars: {len(in_mosaic_idx)}  '
+          f'(accepted={(ocd["FLAGS_PSF"][in_mosaic_idx]==0).sum()})')
 
     # 7. accepted-only mag/n1/n3 for mag-vs-chi2 plot
     mos = ocd[in_mosaic_idx]
@@ -1069,16 +1231,13 @@ def main():
                          psf_star_mask=psf_star_mask)
     print(f'     saturation_peak.png  (sat_peak={_spk}, onset_mag={_smag})')
 
-    # total accepted comes from the FULL OUTCAT (matches mag_vs_halflight),
-    # so the mosaic title can report consistent numbers.
-    n_accepted_total = int(accepted_all_mask.sum())
-    plot_psf_mosaics(psf_dir / 'psf_samples.png',
-                     psf_dir / 'psf_residuals.png',
-                     samp, resi, ocd, in_mosaic_idx, pass1, band_upper,
-                     n_accepted_total=n_accepted_total,
-                     crop_cell=_m.get('psf_size_px'))   # ground: show only the model region
-    print(f'     psf_samples.png / psf_residuals.png  '
-          f'(total accepted={n_accepted_total})')
+    # raw-cutout mosaics (fixed 20/row; full + _thumb for the band table)
+    n_shown, n_ovr = plot_raw_mosaics(psf_dir / 'psf_samples.png',
+                                      psf_dir / 'psf_residuals.png',
+                                      psf_dir, sci, band_upper, band,
+                                      mos, mag_acc, flg_acc)
+    print(f'     psf_samples.png / psf_residuals.png (+_thumb)  '
+          f'(raw cutouts; {n_shown} cells, {n_ovr} override-kept marked)')
 
     # neighbour diagnostic of the ACTUAL selected PSF model stars (same
     # psf_star_mask used by the saturation plot).  GROUND data (HSC, large

@@ -156,6 +156,15 @@ def link_plots_for_tile(band: str, tile: str, instrument: str) -> dict[str, Path
             dst.unlink()
         os.symlink(target, dst)
         linked[panel] = f'plots/{band}/{tile}/{panel}.png'
+        # mosaics: also link the ≤16-row *_thumb (band-page cell) when present
+        if panel in ('psf_samples', 'psf_residuals'):
+            tsrc = Path(str(target).replace('.png', '_thumb.png'))
+            if tsrc.exists():
+                tdst = out_dir / f'{panel}_thumb.png'
+                if tdst.is_symlink() or tdst.exists():
+                    tdst.unlink()
+                os.symlink(tsrc, tdst)
+                linked[f'{panel}_thumb'] = f'plots/{band}/{tile}/{panel}_thumb.png'
     return linked
 
 
@@ -319,6 +328,11 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
     next_tile = tiles[(i + 1) % len(tiles)]
     prev_href = f'../{prev_tile}/{panel}.html'
     next_href = f'../{next_tile}/{panel}.html'
+    # mosaic panels get the zoom + samples⇄residuals swap viewer
+    if panel in ('psf_samples', 'psf_residuals'):
+        return write_mosaic_viewer_page(band, tile, panel, panel_title,
+                                        prev_tile, next_tile, prev_href,
+                                        next_href, back_href, viewer_dir)
     html = dedent(f'''
         <!doctype html>
         <html><head>
@@ -361,6 +375,109 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
     return f'viewer/{band}/{tile}/{panel}.html'
 
 
+def write_mosaic_viewer_page(band, tile, panel, panel_title, prev_tile,
+                             next_tile, prev_href, next_href, back_href,
+                             viewer_dir):
+    """Zoom viewer for the PSF sample/residual mosaics (projects_hsc
+    qa_site.py pattern): zoom in/out/fit/1:1 toolbar, click-to-zoom at the
+    cursor, scroll-pan, and a swap button (space/x) flipping
+    samples⇄residuals while PRESERVING the zoom and scroll position."""
+    samp_rel = f'../../../plots/{band}/{tile}/psf_samples.png'
+    resi_rel = f'../../../plots/{band}/{tile}/psf_residuals.png'
+    start = 'samples' if panel == 'psf_samples' else 'residuals'
+    start_src = samp_rel if panel == 'psf_samples' else resi_rel
+    start_lbl = 'Samples' if panel == 'psf_samples' else 'Residuals'
+    html = dedent(f'''
+        <!doctype html>
+        <html><head>
+          <meta charset="utf-8">
+          <title>PSF QA — {band} {tile} — {panel_title}</title>
+          <link rel="stylesheet" href="../../../css/style.css">
+          <style>
+            .tile-nav {{ display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap; }}
+            .tile-nav .cur {{ font-weight:600; }}
+            .tile-nav .spacer {{ flex:1; }}
+            .zoomtools {{ display:flex; gap:8px; align-items:center; padding:7px 28px;
+              background:#eef0f3; border-bottom:1px solid #ddd; font-size:14px; flex-wrap:wrap; }}
+            .zoomtools button {{ background:#4a90e2; color:#fff; border:0; border-radius:5px;
+              padding:6px 12px; font-size:14px; cursor:pointer; }}
+            .zoomtools button:hover {{ background:#2c70c4; }}
+            .zoomtools button.swap {{ background:#5cb85c; }}
+            .zoomtools button.swap:hover {{ background:#449d44; }}
+            .zoomtools .pct {{ font-weight:600; min-width:46px; }}
+            .zoomtools .hint {{ color:#666; }}
+            .zoombox {{ overflow:auto; width:100%; height:calc(100vh - 152px); background:#111; }}
+            .zoombox img {{ display:block; width:100%; cursor:zoom-in; }}
+          </style>
+        </head><body>
+        <header>
+          <h1>{band} / {tile} — {panel_title}</h1>
+          <div class="tile-nav">
+            <a class="back-btn" href="{prev_href}">◀ Prev tile ({prev_tile})</a>
+            <span class="cur">{tile}</span>
+            <a class="back-btn" href="{next_href}">Next tile ({next_tile}) ▶</a>
+            <span class="spacer"></span>
+            <a class="back-btn" href="{back_href}">↑ All {band} tiles</a>
+          </div>
+        </header>
+        <div class="zoomtools">
+          <button id="swapbtn" class="swap">&#8646; Samples / Residuals</button><span class="pct">showing&nbsp;<b id="whichlbl">{start_lbl}</b></span>
+          <button id="zout">– Zoom out</button>
+          <button id="zin">+ Zoom in</button>
+          <button id="fit">Fit width</button>
+          <button id="one">1:1 pixels</button>
+          <span class="pct" id="pct">100%</span>
+          <span class="spacer"></span>
+          <span class="hint">scroll to pan · click to zoom · space/x = flip samples⇄residuals · ←/→ flip tiles</span>
+        </div>
+        <div class="zoombox" id="box">
+          <img id="mosaic" src="{start_src}" alt="{panel}">
+        </div>
+        <script>
+          var img=document.getElementById('mosaic'), box=document.getElementById('box'),
+              pct=document.getElementById('pct'); var scale=1, fit=true;
+          function render(){{ img.style.width=(img.naturalWidth*scale)+'px';
+            pct.textContent=Math.round(scale*100)+'%'; }}
+          function doFit(){{ fit=true; scale=box.clientWidth/img.naturalWidth; render(); }}
+          function zoomTo(s, fx, fy){{ if(fx==null)fx=0.5; if(fy==null)fy=0.5;
+            fit=false; scale=Math.max(0.05, Math.min(s, 8)); render();
+            box.scrollLeft=fx*img.naturalWidth*scale - box.clientWidth/2;
+            box.scrollTop =fy*img.naturalHeight*scale - box.clientHeight/2; }}
+          document.getElementById('zin').onclick =function(){{ zoomTo(scale*1.4); }};
+          document.getElementById('zout').onclick=function(){{ zoomTo(scale/1.4); }};
+          document.getElementById('one').onclick =function(){{ zoomTo(1); }};
+          document.getElementById('fit').onclick =doFit;
+          img.onclick=function(e){{ var r=img.getBoundingClientRect();
+            zoomTo(scale*1.5,(e.clientX-r.left)/img.clientWidth,(e.clientY-r.top)/img.clientHeight); }};
+          window.addEventListener('resize', function(){{ if(fit) doFit(); }});
+          if(img.complete && img.naturalWidth) doFit(); else img.onload=doFit;
+          document.addEventListener('keydown', function (e) {{
+            if (e.key === 'ArrowRight') location.href = '{next_href}';
+            else if (e.key === 'ArrowLeft') location.href = '{prev_href}';
+          }});
+          var PAIR={{samples:'{samp_rel}', residuals:'{resi_rel}'}};
+          var curImg='{start}', lbl=document.getElementById('whichlbl');
+          function swapImg(){{
+            var fx=(box.scrollLeft+box.clientWidth/2)/(img.naturalWidth*scale);
+            var fy=(box.scrollTop+box.clientHeight/2)/(img.naturalHeight*scale);
+            curImg=(curImg==='samples')?'residuals':'samples';
+            img.onload=function(){{render();
+              box.scrollLeft=fx*img.naturalWidth*scale-box.clientWidth/2;
+              box.scrollTop =fy*img.naturalHeight*scale-box.clientHeight/2;
+              lbl.textContent=(curImg==='samples')?'Samples':'Residuals';}};
+            img.src=PAIR[curImg];
+          }}
+          document.getElementById('swapbtn').onclick=swapImg;
+          document.addEventListener('keydown',function(e){{
+            if(e.key===' '||e.key==='x'||e.key==='X'){{e.preventDefault();swapImg();}}
+          }});
+        </script>
+        </body></html>
+    ''').strip()
+    (viewer_dir / f'{panel}.html').write_text(html)
+    return f'viewer/{band}/{tile}/{panel}.html'
+
+
 # band instrument → footprint-grid instrument whose tilemaps/ minimaps apply
 # (bands of one survey share the tile grid; keys match 59_'s PANELS sources)
 _TILEMAP_GRID = [
@@ -395,9 +512,12 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
             if panel in linked:
                 rel = linked[panel]
                 viewer_rel = write_viewer_page(band, tile, panel, panel_title, rel, tiles)
+                # mosaics: the band-page cell shows the ≤16-row _thumb (the
+                # full mosaic can be hundreds of rows); the viewer shows full.
+                cell_img = linked.get(f'{panel}_thumb', rel)
                 cells.append(
                     f'<td class="panel"><a href="{viewer_rel}">'
-                    f'<span class="thumb-box"><img src="{rel}" alt="{panel}"/></span>'
+                    f'<span class="thumb-box"><img src="{cell_img}" alt="{panel}"/></span>'
                     f'</a></td>'
                 )
             else:
