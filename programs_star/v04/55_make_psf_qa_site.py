@@ -264,8 +264,21 @@ def write_index(band_status: dict[str, int]):
           <p>Per-band PSF model diagnostics.  Click a band to see one row
           per tile, with 6 diagnostic panels each.  Click any panel to
           open the full-resolution image.</p>
-          <div class="band-grid">
     ''').strip()
+    # per-survey tiling map (59_make_tiling_plot.py), shown when present
+    if (HTML_DIR / 'tiling_cosmos.png').exists():
+        body += dedent('''
+          <h2 style="margin:18px 0 6px;">Survey tiling</h2>
+          <p style="margin-top:0;">On-sky tile footprints per survey
+          (filled = PSF model built), over the wide Gaia DR3 star field.
+          The faint grid in every panel is the JWST COSMOS-Web A/B tiling.
+          Click to open full resolution.</p>
+          <a href="tiling_cosmos.png" target="_blank"><img src="tiling_cosmos.png"
+             alt="per-survey tiling map"
+             style="width:100%;max-width:1200px;border:1px solid #ccc;
+                    border-radius:6px;background:#fff;"></a>
+        ''')
+    body += '\n  <div class="band-grid">\n'
     body += '\n'.join(cards)
     body += dedent('''
           </div>
