@@ -1,5 +1,29 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
+## ✅ 2026-07-06 18:35 — PSF v2 CAMPAIGN COMPLETE (all 12 surveys)
+
+Every survey now carries the hostgalxy-consistent v2 record:
+- HST F814W 20/20 + JWST 4 bands x 20 tiles 80/80 REBUILT with the
+  10xFWHM space isolation + 7-bit stamp gate (psf_gate.py; JWST adds
+  nbr_dmag=6, blend core-exclusion, bright/spike gate-2 exemption).
+  JWST model stars: SW ~200-266/tile, LW ~75-83/tile, spike stars kept.
+  ⚠ stars_<suffix>.psf + metas CHANGED for ALL HST+JWST tiles →
+  3a-③ photometry for HST and JWST must be RERUN.
+- JWST pass1 is now VIGNET-less (55 MB vs 30 GB; the giant row-major
+  catalogs wedged 6 builders for 3 h at 0.1% CPU + filled the disk on
+  the first overnight attempt).  stars LDAC VIGNETs are built in-memory
+  (54_ write_stars_ldac) — raw stamps, spikes can never be deblend-
+  blanked; companion contamination handled by the gate.
+- Euclid VIS/NISP + HSC psf_qa pages now IMPORT the hostgalxy record
+  (qa_psf_cosmos site / ~/data/psf_v01; VIS 30, NISP-Y 30, J/H 28,
+  HSC 10 COSMOS tracts x grizy).  v04 Euclid/HSC model files on exdisk1
+  are UNTOUCHED (photometry chain unaffected) — but note the newer
+  hostgalxy Euclid/HSC models exist if 3a-③ wants them.
+- unWISE/PS1/LS/SDSS fully rebuilt (60_ --force) with the raw-cutout QA.
+- Site: all rows new-style (gate mosaics w/ red reject frames, toggle
+  viewers, neighbour Δmag-vs-sep).  Deploy repo re-exported.
+
+
 ## ⚠️ 2026-07-05 — HST F814W PSF MODELS BEING REBUILT (v2 gate) — 3a-③ HST photometry should wait/rerun
 
 User-approved v2 recipe (commit e55fe2d2): hostgalxy-consistent star
