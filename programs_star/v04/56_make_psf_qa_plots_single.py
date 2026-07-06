@@ -611,14 +611,65 @@ def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
     band-page table."""
     from scipy.ndimage import shift as ndshift, zoom
 
+    # items = (x, y, mag, flag_word|None, red?) — REJECTED stars (from the
+    # builder's stars_rejected_<suffix>.fits, hostgalxy 7-bit gate) come FIRST
+    # with a red frame + reason, then the model stars.  Builders that have not
+    # been upgraded fall back to the OUTCAT FLAGS_PSF split: red 'PSFEx-rej'
+    # unless the builder has bright-override machinery (meta n_override_bright
+    # > 0), in which case orange 'override' semantics apply.
+    RBITS = [(1, 'edge'), (2, 'nbr'), (4, 'bad-pix'), (8, 'blend'),
+             (16, 'sat'), (32, 'asym'), (64, 'outer')]
+
+    def _rej_word(v):
+        return '+'.join(w for b, w in RBITS if v & b) or f'F={int(v)}'
+
+    def _psfex_word(v):
+        if   v & 1:  return 'neighbor'
+        elif v & 4:  return 'residual'
+        elif v & 8:  return 'elong'
+        elif v & 16: return 'low-snr'
+        return f'F={int(v)}'
+
+    items = []
+    rejf = psf_dir / f'stars_rejected_{suffix}.fits'
+    if rejf.exists():
+        rd = fits.open(rejf)[1].data
+        rmag = np.asarray(rd['MAG_AUTO'], float)
+        for k in np.argsort(rmag):
+            items.append((float(rd['X_IMAGE'][k]), float(rd['Y_IMAGE'][k]),
+                          float(rmag[k]), _rej_word(int(rd['REJ_REASON'][k])),
+                          True))
     xs_ = np.asarray(mos['X_IMAGE'], float)
     ys_ = np.asarray(mos['Y_IMAGE'], float)
     flgpsf = np.asarray(mos['FLAGS_PSF'], int)
-    ovr = np.where(flgpsf != 0)[0]; ovr = ovr[np.argsort(mag_mos[ovr])]
-    cln = np.where(flgpsf == 0)[0]; cln = cln[np.argsort(mag_mos[cln])]
-    order = np.concatenate([ovr, cln]).astype(int)
+    try:
+        import json as _json2
+        _ovr_ok = (_json2.loads((psf_dir / f'psf_{suffix}.meta.json')
+                                .read_text()).get('n_override_bright') or 0) > 0
+    except Exception:
+        _ovr_ok = False
+    if not rejf.exists():
+        # legacy outcat mode: PSFEx-flagged stars first (red, or orange when
+        # the builder deliberately reinstated them), then clean
+        fl = np.where(flgpsf != 0)[0]; fl = fl[np.argsort(mag_mos[fl])]
+        for k in fl:
+            items.append((xs_[k], ys_[k], float(mag_mos[k]),
+                          _psfex_word(flgpsf[k]), not _ovr_ok))
+        cln = np.where(flgpsf == 0)[0]
+        cln = cln[np.argsort(mag_mos[cln])]
+        for k in cln:
+            items.append((xs_[k], ys_[k], float(mag_mos[k]), None, False))
+    else:
+        # gate mode: kept cells = EVERY star in the model file (stars_<suffix>
+        # LDAC), like the hostgalxy page — the outcat is PSFEx's post-filter
+        # subset and would under-count the model set.
+        _sd = fits.open(psf_dir / f'stars_{suffix}.fits')[2].data
+        _sm = np.asarray(_sd['MAG_AUTO'], float)
+        for k in np.argsort(_sm):
+            items.append((float(_sd['X_IMAGE'][k]), float(_sd['Y_IMAGE'][k]),
+                          float(_sm[k]), None, False))
     if max_show is not None:
-        order = order[:max_show]
+        items = items[:max_show]
 
     # PSF model: PSF_MASK polynomial from the builder's .psf, PSF_SAMP resample
     pp = fits.open(psf_dir / f'stars_{suffix}.psf')[1]
@@ -642,7 +693,7 @@ def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
         return p
 
     ny, nx = sci.shape
-    H = psf_at(xs_[order[0]], ys_[order[0]]).shape[0] // 2
+    H = psf_at(float(np.median(xs_)), float(np.median(ys_))).shape[0] // 2
     W = 2 * H + 1
     yy_, xx_ = np.mgrid[-H:H+1, -H:H+1]
     rad = np.hypot(xx_, yy_)
@@ -651,26 +702,18 @@ def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
     r_fit = min(16.0, H - 1.0)
     fitm = rad < r_fit; outr = rad > min(14.0, 0.9 * H)
     PER = 20
-    rows = (len(order) + PER - 1) // PER
+    rows = (len(items) + PER - 1) // PER
     SM = np.full((rows * W, PER * W), np.nan); RM = np.full_like(SM, np.nan)
 
-    def reason_word(v):
-        if   v & 1:  return 'neighbor'
-        elif v & 4:  return 'residual'
-        elif v & 8:  return 'elong'
-        elif v & 16: return 'low-snr'
-        return f'F={int(v)}'
-
-    cells = []                            # (r, c, num, mag, chi2, word|None)
-    for n, k in enumerate(order):
+    cells = []                    # (r, c, num, mag, chi2, word|None, red?)
+    for n, (Xr, Yr, mg, word, is_red) in enumerate(items):
         # SExtractor X/Y_IMAGE are 1-indexed; the numpy cutout is 0-indexed.
         # (Verified on HST B5: the 1-px correction cuts max|resid| 2-5x.)
-        X, Y = xs_[k] - 1.0, ys_[k] - 1.0
+        X, Y = Xr - 1.0, Yr - 1.0
         xi, yi = int(round(X)), int(round(Y))
         r, cc = n // PER, n % PER
-        word = reason_word(flgpsf[k]) if flgpsf[k] else None
         if yi - H < 0 or xi - H < 0 or yi + H + 1 > ny or xi + H + 1 > nx:
-            cells.append((r, cc, n + 1, mag_mos[k], -1.0, word)); continue
+            cells.append((r, cc, n + 1, mg, -1.0, word, is_red)); continue
         c = np.nan_to_num(sci[yi-H:yi+H+1, xi-H:xi+H+1].astype(float))
         P = ndshift(psf_at(X, Y), (Y - yi, X - xi), order=3)
         gy, gx = np.gradient(P)
@@ -685,12 +728,20 @@ def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
                          vmax=max(float(np.nanmax(c)), 1e-9), asinh_a=0.05)
         SM[r*W:(r+1)*W, cc*W:(cc+1)*W] = np.clip(sn(c), 0, 1)
         RM[r*W:(r+1)*W, cc*W:(cc+1)*W] = Rres / pk
-        cells.append((r, cc, n + 1, mag_mos[k], chi2, word))
+        cells.append((r, cc, n + 1, mg, chi2, word, is_red))
 
-    n_ovr = int((flgpsf[order] != 0).sum())
+    n_rej = sum(1 for it in items if it[3] and it[4])
+    n_ovr = sum(1 for it in items if it[3] and not it[4])
     fs_num, fs_lab = 13.0, 10.5
-    cap = (f'{n_ovr} override-kept (orange border + why PSFEx flagged it) first, '
-           f'then clean-accepted; brightest first; 20/row')
+    if rejf.exists():
+        cap = (f'{n_rej} REJECTED (red border + gate reason) first, then '
+               f'{len(items)-n_rej} model stars; brightest first; 20/row')
+    elif n_ovr:
+        cap = (f'{n_ovr} override-kept (orange border + why PSFEx flagged it) '
+               f'first, then clean-accepted; brightest first; 20/row')
+    else:
+        cap = (f'{n_rej} PSFEx-rejected (red border + reason) first, then '
+               f'clean-accepted; brightest first; 20/row')
 
     def _render(arr, png, cmap, vl, ttl, tc, nr, title=True):
         fig, ax = plt.subplots(figsize=(PER * 1.1, nr * 1.1 + (1.2 if title else 0.2)))
@@ -698,7 +749,7 @@ def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
                   origin='upper', extent=[0, PER, nr, 0])
         for cl in range(PER + 1): ax.axvline(cl, color='cyan', lw=0.4, alpha=0.4)
         for rl in range(nr + 1): ax.axhline(rl, color='cyan', lw=0.4, alpha=0.4)
-        for (r, cc, num, mg, chi2, word) in cells:
+        for (r, cc, num, mg, chi2, word, is_red) in cells:
             if r >= nr: continue
             ax.text(cc + 0.04, r + 0.05, str(num), color=tc, fontsize=fs_num,
                     fontweight='bold', va='top', family='serif')
@@ -708,9 +759,10 @@ def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
                 ax.text(cc + 0.96, r + 0.96, f'χ²={chi2:.0f}', color=tc,
                         fontsize=fs_lab, va='bottom', ha='right', family='serif')
             if word:
+                fc = 'red' if is_red else 'orange'
                 ax.add_patch(Rectangle((cc, r), 1, 1, fill=False,
-                                       edgecolor='orange', lw=1.8))
-                ax.text(cc + 0.04, r + 0.22, word, color='orange',
+                                       edgecolor=fc, lw=1.8))
+                ax.text(cc + 0.04, r + 0.22, word, color=fc,
                         fontsize=fs_lab, fontweight='bold', va='top',
                         ha='left', family='serif')
         ax.set_xticks([]); ax.set_yticks([])
@@ -728,7 +780,7 @@ def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
         thumb = png.with_name(png.stem + '_thumb' + png.suffix)
         _render(arr, png, cmap, vl, ttl, tc, rows)                    # full (viewer)
         _render(arr, thumb, cmap, vl, ttl, tc, min(16, rows), title=False)
-    return len(order), n_ovr
+    return len(items), n_rej + n_ovr
 
 
 def plot_psf_mosaics(out_samp_png, out_resi_png, samp, resi, ocd,
@@ -885,6 +937,76 @@ def plot_psf_mosaics(out_samp_png, out_resi_png, samp, resi, ocd,
            f'Total accepted = {n_accepted_total}; mosaic shows {n_acc_in_mos}.  '
            f'Red frame = PSFEx-rejected ({n_rej});  Orange = high χ² ({n_orange}).',
            out_resi_png)
+
+
+def plot_neighbour_radius_dmag(out_png, xx, yy, mag, psf_mask, tree, band_upper,
+                               iso_radius_arcsec=None, fwhm_arcsec=None,
+                               iso_label='isolation cut', max_arcsec=5.0):
+    """hostgalxy neighbour diagnostic (qa_plots.py plot_neighbour_radius_dmag):
+    for EVERY detection with 0 < mag < 30, the separation to its nearest
+    neighbour vs that neighbour's Δmag.  PSF model stars are opaque filled
+    circles; every other detection is a translucent magnitude-coloured square
+    (overlaps build density).  Y-axis FLIPPED: brighter neighbour up.
+    Isolated PSF stars sit at large separation / faint neighbours; the
+    contaminated corner (small separation, bright neighbour) is exactly what
+    the isolation cut (red line) removes."""
+    xx = np.asarray(xx, float); yy = np.asarray(yy, float)
+    mag = np.asarray(mag, float)
+    ok = (np.isfinite(xx) & np.isfinite(yy) & np.isfinite(mag)
+          & (mag > 0) & (mag < 30))
+    if int(ok.sum()) < 5:
+        print(f'  [skip] {out_png.name}: too few finite detections'); return
+    dist, jid = tree.query(np.column_stack([xx, yy]), k=2)   # k=1 is the source itself
+    sep = dist[:, 1] * PIX
+    dmag = mag[jid[:, 1]] - mag                               # neighbour − source
+    # the neighbour must also be in the mag range or Δmag is meaningless
+    fin = ok & ok[jid[:, 1]] & np.isfinite(sep) & np.isfinite(dmag)
+    good = np.asarray(psf_mask, bool) & fin
+    other = fin & ~np.asarray(psf_mask, bool)
+    fig, ax = plt.subplots(figsize=(11, 7))
+    vmin = float(np.nanpercentile(mag[fin], 2))
+    vmax = float(np.nanpercentile(mag[fin], 98))
+    if int(other.sum()):
+        ax.scatter(sep[other], dmag[other], c=mag[other], cmap='rainbow_r',
+                   vmin=vmin, vmax=vmax, s=10, marker='s', alpha=0.12,
+                   linewidths=0, rasterized=True, zorder=1,
+                   label=f'neighbouring objects ({int(other.sum())})')
+    _sm = plt.cm.ScalarMappable(cmap='rainbow_r',
+                                norm=plt.Normalize(vmin=vmin, vmax=vmax))
+    if int(good.sum()):
+        ax.scatter(sep[good], dmag[good], c=mag[good], cmap='rainbow_r',
+                   vmin=vmin, vmax=vmax, s=34, marker='o', edgecolor='k',
+                   linewidths=0.4, alpha=0.95, zorder=3,
+                   label=f'PSF model stars ({int(good.sum())})')
+    _sm.set_array([])
+    cb = fig.colorbar(_sm, ax=ax, pad=0.015)
+    cb.set_label('magnitude  (red = bright → blue = faint)',
+                 fontsize=12, family='serif')
+    ax.axhline(0.0, color='0.35', ls=':', lw=1.6, zorder=2,
+               label='Δmag = 0 (neighbour as bright as source)')
+    if fwhm_arcsec:
+        ax.axvline(fwhm_arcsec, color='green', ls=':', lw=1.9, alpha=0.9,
+                   zorder=2, label=f'FWHM = {fwhm_arcsec:.2f}″')
+    if iso_radius_arcsec:
+        ax.axvline(iso_radius_arcsec, color='red', ls='--', lw=1.9, alpha=0.9,
+                   zorder=2, label=f'{iso_label} = {iso_radius_arcsec:.2f}″')
+    ax.set_xlim(0, max_arcsec)
+    ax.set_ylim(8.5, -4.0)                 # FLIPPED: brighter neighbour up
+    ax.set_xlabel('Separation to nearest neighbour (arcsec)',
+                  fontsize=14, family='serif')
+    ax.set_ylabel('Δmag  (nearest neighbour − source)   ·   brighter neighbour ↑',
+                  fontsize=14, family='serif')
+    ax.set_title(f'Neighbour diagnostic — {band_upper}   '
+                 f'({int(good.sum())} PSF stars, {int(fin.sum())} detections)',
+                 fontsize=12.5, family='serif')
+    ax.legend(loc='upper right', fontsize=10, framealpha=0.92)
+    ax.grid(alpha=0.25)
+    ax.tick_params(which='both', direction='in', top=True, right=True,
+                   labelsize=12, length=6)
+    ax.tick_params(which='minor', length=3); ax.minorticks_on()
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=120, bbox_inches='tight')
+    plt.close(fig)
 
 
 def plot_neighbour_scatter(out_png, xx, yy, mag, psf_mask, tree, band_upper,
@@ -1240,25 +1362,21 @@ def main():
           f'(raw cutouts; {n_shown} cells, {n_ovr} override-kept marked)')
 
     # neighbour diagnostic of the ACTUAL selected PSF model stars (same
-    # psf_star_mask used by the saturation plot).  GROUND data (HSC, large
-    # pixels, crowded COSMOS) gets the Δmag-vs-separation contamination map;
-    # SPACE data keeps the neighbour-count histogram.
-    if PIX >= 0.15:
-        _fwhm_px = _m.get('fwhm_px')
-        _seeing  = (_fwhm_px * PIX) if _fwhm_px else None
-        plot_neighbour_scatter(psf_dir / 'neighbour_scatter.png',
+    # psf_star_mask used by the saturation plot).  ALL surveys now get the
+    # hostgalxy Δmag-vs-separation contamination map (the neighbour-count
+    # histogram is retired; plot_hist_n kept for reference).  The isolation
+    # line comes from the builder meta: r_nbr_arcsec (space builders,
+    # 10 x FWHM rule) or nbr_radius_arcsec (ground builders).
+    _fwhm_px = _m.get('fwhm_px') or _m.get('psf_fwhm_est_px')
+    _seeing  = (_fwhm_px * PIX) if _fwhm_px else None
+    _iso = _m.get('r_nbr_arcsec') or _m.get('nbr_radius_arcsec')
+    _nf = _m.get('nbr_iso_fwhm') or _m.get('nbr_fwhm')
+    plot_neighbour_radius_dmag(psf_dir / 'neighbour_scatter.png',
                                xx, yy, mag, psf_star_mask, tree, band_upper,
-                               max_arcsec=5.0,
-                               iso_radius_arcsec=_m.get('nbr_radius_arcsec'),
-                               seeing_fwhm_arcsec=_seeing,
-                               nbr_fwhm=_m.get('nbr_fwhm'))
-        print(f'     neighbour_scatter.png')
-    else:
-        plot_hist_n(psf_dir / 'hist_n_means.png',
-                    {r: n_arr[r] for r in [1,2,3,4,5]},
-                    psf_star_mask, band_upper,
-                    iso_radius_arcsec=_m.get('nbr_radius_arcsec'))
-        print(f'     hist_n_means.png')
+                               iso_radius_arcsec=_iso, fwhm_arcsec=_seeing,
+                               iso_label=(f'isolation cut ({_nf:.0f} × FWHM)'
+                                          if _nf else 'isolation cut'))
+    print(f'     neighbour_scatter.png')
     print(f'=== {band_upper} A4 QA plots done ===')
 
 

@@ -79,7 +79,7 @@ PANELS = [
     ('saturation_peak',   'Peak Count vs Mag (saturation)'),
     ('psf_samples',       'PSF Samples Mosaic'),
     ('psf_residuals',     'PSF Residuals Mosaic'),
-    ('hist_n_means',      'Neighbour Diagnostic (hist / Δmag–sep)'),
+    ('hist_n_means',      'Neighbour Δmag vs Separation'),
 ]
 
 # Mapping from canonical panel name → source-file glob to copy/link.
@@ -134,15 +134,14 @@ def link_plots_for_tile(band: str, tile: str, instrument: str) -> dict[str, Path
     linked = {}
     for panel, _ in PANELS:
         target = None
-        # production location (preferred): produced by 56_make_psf_qa_plots.py
-        cand = WORK / instrument / tile / 'psf' / f'{panel}.png'
-        if cand.exists():
-            target = cand
-        # ground data (HSC) replaces the neighbour-count histogram with the
-        # Δmag-vs-separation contamination scatter in the SAME slot.
-        elif panel == 'hist_n_means' and \
+        # the neighbour slot PREFERS the hostgalxy Δmag-vs-separation scatter;
+        # the old neighbour-count histogram is only a fallback for tiles not
+        # yet regenerated.
+        if panel == 'hist_n_means' and \
                 (WORK / instrument / tile / 'psf' / 'neighbour_scatter.png').exists():
             target = WORK / instrument / tile / 'psf' / 'neighbour_scatter.png'
+        elif (WORK / instrument / tile / 'psf' / f'{panel}.png').exists():
+            target = WORK / instrument / tile / 'psf' / f'{panel}.png'
         # fallback to F115W A4 pilot if production is not yet there
         elif band == 'F115W' and tile == 'A4':
             src = PILOT / PILOT_SRC[panel]
@@ -333,6 +332,8 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
         return write_mosaic_viewer_page(band, tile, panel, panel_title,
                                         prev_tile, next_tile, prev_href,
                                         next_href, back_href, viewer_dir)
+    # line plots: zoombox viewer with TOGGLE click — one click zooms in at the
+    # cursor, the next click returns to fit (like the tile minimaps).
     html = dedent(f'''
         <!doctype html>
         <html><head>
@@ -340,9 +341,18 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
           <title>PSF QA — {band} {tile} — {panel_title}</title>
           <link rel="stylesheet" href="../../../css/style.css">
           <style>
-            .tile-nav {{ display:flex; gap:10px; align-items:center; margin-top:8px; }}
+            .tile-nav {{ display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap; }}
             .tile-nav .cur {{ font-weight:600; }}
             .tile-nav .spacer {{ flex:1; }}
+            .zoomtools {{ display:flex; gap:8px; align-items:center; padding:7px 28px;
+              background:#eef0f3; border-bottom:1px solid #ddd; font-size:14px; flex-wrap:wrap; }}
+            .zoomtools button {{ background:#4a90e2; color:#fff; border:0; border-radius:5px;
+              padding:6px 12px; font-size:14px; cursor:pointer; }}
+            .zoomtools button:hover {{ background:#2c70c4; }}
+            .zoomtools .pct {{ font-weight:600; min-width:46px; }}
+            .zoomtools .hint {{ color:#666; }}
+            .zoombox {{ overflow:auto; width:100%; height:calc(100vh - 152px); background:#fff; }}
+            .zoombox img {{ display:block; width:100%; cursor:zoom-in; }}
           </style>
         </head><body>
         <header>
@@ -355,13 +365,42 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
             <a class="back-btn" href="{back_href}">↑ All {band} tiles</a>
           </div>
         </header>
-        <div class="viewer-wrap">
-          <div class="viewer-title">Click image for native pixel size · ← / → arrow keys flip tiles</div>
-          <a href="{img_from_viewer}" target="_blank">
-            <img src="{img_from_viewer}" alt="{panel}">
-          </a>
+        <div class="zoomtools">
+          <button id="zout">– Zoom out</button>
+          <button id="zin">+ Zoom in</button>
+          <button id="fit">Fit width</button>
+          <button id="one">1:1 pixels</button>
+          <span class="pct" id="pct">100%</span>
+          <span class="spacer"></span>
+          <span class="hint">click = zoom in · click again = back · scroll to pan · ←/→ flip tiles</span>
+        </div>
+        <div class="zoombox" id="box">
+          <img id="plotimg" src="{img_from_viewer}" alt="{panel}">
         </div>
         <script>
+          var img=document.getElementById('plotimg'), box=document.getElementById('box'),
+              pct=document.getElementById('pct'); var scale=1, fit=true;
+          function render(){{ img.style.width=(img.naturalWidth*scale)+'px';
+            pct.textContent=Math.round(scale*100)+'%';
+            img.style.cursor = fit ? 'zoom-in' : 'zoom-out'; }}
+          function doFit(){{ fit=true; scale=box.clientWidth/img.naturalWidth; render(); }}
+          function zoomTo(s, fx, fy){{ if(fx==null)fx=0.5; if(fy==null)fy=0.5;
+            fit=false; scale=Math.max(0.05, Math.min(s, 8)); render();
+            box.scrollLeft=fx*img.naturalWidth*scale - box.clientWidth/2;
+            box.scrollTop =fy*img.naturalHeight*scale - box.clientHeight/2; }}
+          document.getElementById('zin').onclick =function(){{ zoomTo(scale*1.4); }};
+          document.getElementById('zout').onclick=function(){{ zoomTo(scale/1.4); }};
+          document.getElementById('one').onclick =function(){{ zoomTo(1); }};
+          document.getElementById('fit').onclick =doFit;
+          img.onclick=function(e){{
+            var r=img.getBoundingClientRect();
+            if (fit) zoomTo(Math.max(1.0, scale*2.2),
+                            (e.clientX-r.left)/img.clientWidth,
+                            (e.clientY-r.top)/img.clientHeight);
+            else doFit();                       // second click → back to fit
+          }};
+          window.addEventListener('resize', function(){{ if(fit) doFit(); }});
+          if(img.complete && img.naturalWidth) doFit(); else img.onload=doFit;
           document.addEventListener('keydown', function (e) {{
             if (e.key === 'ArrowRight') location.href = '{next_href}';
             else if (e.key === 'ArrowLeft') location.href = '{prev_href}';
