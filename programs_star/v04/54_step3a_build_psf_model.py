@@ -154,6 +154,33 @@ def resolve_source(tile, band):
     return str(sf), sex_wht, sci, zp_from_pixar(sf), str(sf), 0
 
 
+def write_stars_ldac(hcat, obj, idx, sci, vig, path):
+    """Write a PSFEx-ready FITS_LDAC for the selected stars, constructing the
+    VIGNET column IN MEMORY from the already-loaded SCI (pass1 is written
+    without VIGNET: a 350k-row x 91KB-row catalog cost 30 GB of strided I/O
+    per tile-band and wedged six concurrent builders for hours; the VIGNETs
+    are only ever needed for the ~200 selected stars)."""
+    idx = np.asarray(idx, int)
+    ny, nx = sci.shape
+    H = vig // 2
+    vg = np.full((len(idx), vig, vig), -1e30, np.float32)
+    xs = np.asarray(obj['X_IMAGE'], float); ys = np.asarray(obj['Y_IMAGE'], float)
+    for i, k in enumerate(idx):
+        # SExtractor VIGNETs are centred on the integer pixel (1-indexed)
+        x = int(round(xs[k])) - 1; y = int(round(ys[k])) - 1
+        x0, x1 = max(0, x-H), min(nx, x+H+1)
+        y0, y1 = max(0, y-H), min(ny, y+H+1)
+        vg[i, (y0-(y-H)):(y1-(y-H)), (x0-(x-H)):(x1-(x-H))] = sci[y0:y1, x0:x1]
+    rows = obj[idx]
+    cols = [fits.Column(name=c.name, format=c.format, array=rows[c.name])
+            for c in hcat[2].columns]
+    cols.append(fits.Column(name='VIGNET', format=f'{vig*vig}E',
+                            dim=f'({vig},{vig})', array=vg))
+    objs = fits.BinTableHDU.from_columns(cols)
+    objs.name = 'LDAC_OBJECTS'
+    fits.HDUList([hcat[0], hcat[1], objs]).writeto(path, overwrite=True)
+
+
 def main():
     args = parse_args()
     band = args.filter
@@ -177,7 +204,7 @@ def main():
         cmd = ['sex', sex_img,
                '-c', str(CONFIGS / f'{args.instrument}.sex'),
                '-CATALOG_NAME', str(cat1),
-               '-PARAMETERS_NAME', str(CONFIGS / f'pass1_jwst_{chan}.param'),
+               '-PARAMETERS_NAME', str(CONFIGS / f'pass1_jwst_{chan}_novig.param'),
                '-FILTER_NAME', str(CONFIGS / 'default.conv'),
                '-STARNNW_NAME', str(CONFIGS / 'default.nnw'),
                '-MAG_ZEROPOINT', f'{zp:.4f}',
@@ -320,8 +347,7 @@ def main():
     fwhm_lo = max(1.2, 0.6 * psf_fwhm_est)
     fwhm_hi = 2.5 * psf_fwhm_est
     star_cat = out / f'stars_{band}.fits'
-    hcat[2].data = obj[midx1]
-    hcat.writeto(star_cat, overwrite=True)
+    write_stars_ldac(hcat, obj, midx1, sci, psf_size, star_cat)
     print('\n── PSFEx pass-2a (provisional, for asym/outer gates) ──', flush=True)
     cmd = ['psfex', str(star_cat),
            '-c', str(CONFIGS / f'psfex_jwst_{chan}.psfex'),
@@ -352,8 +378,7 @@ def main():
 
     # ── final PSFEx pass-2b: model + aligned OUTCAT (no check-images; the
     #    QA mosaics are raw-cutout based) ──
-    hcat[2].data = obj[midx2]
-    hcat.writeto(star_cat, overwrite=True)
+    write_stars_ldac(hcat, obj, midx2, sci, psf_size, star_cat)
     print(f'  wrote {star_cat.name} ({len(midx2)} model stars)')
     print('\n── PSFEx pass-2b (final) ──', flush=True)
     print(f'  SAMPLE_FWHMRANGE = {fwhm_lo:.2f},{fwhm_hi:.2f} px '
