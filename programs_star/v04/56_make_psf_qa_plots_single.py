@@ -74,6 +74,17 @@ def gaia_match(ra, dec, radius_arcsec=0.6):
 # globals so the plot/outcat helpers can read them.
 INSTRUMENTS = {
     'euclid_vis':    {'pix': 0.10,  'psfex': 'psfex_euclid_vis.psfex', 'label': 'Euclid VIS'},
+    # JWST NIRCam — v2 builder writes per-(instrument,tile) with the FILTER
+    # as the filename suffix (psf_f115w.meta.json etc.), unlike every other
+    # survey where suffix = tile id; 'suffix' overrides the default.
+    'jwst_nircam_f115w': {'pix': 0.030, 'psfex': 'psfex_jwst_sw.psfex',
+                          'label': 'JWST NIRCam F115W', 'suffix': 'f115w'},
+    'jwst_nircam_f150w': {'pix': 0.030, 'psfex': 'psfex_jwst_sw.psfex',
+                          'label': 'JWST NIRCam F150W', 'suffix': 'f150w'},
+    'jwst_nircam_f277w': {'pix': 0.030, 'psfex': 'psfex_jwst_lw.psfex',
+                          'label': 'JWST NIRCam F277W', 'suffix': 'f277w'},
+    'jwst_nircam_f444w': {'pix': 0.030, 'psfex': 'psfex_jwst_lw.psfex',
+                          'label': 'JWST NIRCam F444W', 'suffix': 'f444w'},
     'hst_acs_f814w': {'pix': 0.030, 'psfex': 'psfex_hst_acs.psfex',    'label': 'HST ACS F814W'},
     # Euclid NISP (Y/J/H) — MER mosaics resampled to 0.10"/px (native 0.30");
     # built by 54_..._euclid.py --band; uses the NISP-tuned PSFEx config.
@@ -1142,7 +1153,7 @@ def main():
     cfg = INSTRUMENTS[args.instrument]
     PIX = cfg['pix']
     _PSFEX_CFG = cfg['psfex']
-    band = args.tile                       # filename suffix key (= tile id)
+    band = cfg.get('suffix') or args.tile  # filename suffix (tile id, or filter for JWST)
     band_upper = f"{cfg['label']} {args.tile}"
     psf_dir = WORK / args.instrument / args.tile / 'psf'
     if not psf_dir.exists():

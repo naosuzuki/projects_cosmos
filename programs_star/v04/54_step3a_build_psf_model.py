@@ -283,85 +283,82 @@ def main():
     # flag stars whose VIGNET overlaps a real gap (many masked pixels).
     gap_masked = vignet_masked > 5
 
-    # Neighbour count within 1" (n_1).  External neighbours within 1"
-    # contaminate the PSF.  Spike-deblended bright stars (FLAGS≥2) get
-    # their own spike fragments counted as neighbours, so we only cut on
-    # n_1 ≥ 2 AND FLAGS < 2 (no self-deblending).  Verified on F115W A4:
-    # cuts 9 visibly-contaminated stars (vs cutting 44 if FLAGS<2 not
-    # required, 35 of which were real spike stars we want to keep).
-    from scipy.spatial import cKDTree
-    R_ARCSEC = 1.0
-    pix_scale = 0.030               # arcsec/px on COSMOS-Web 30 mas mosaics
-    r_pix = R_ARCSEC / pix_scale
-    tree = cKDTree(np.column_stack([xx, yy]))
-    n1 = np.array([len(tree.query_ball_point([xx[k], yy[k]], r_pix)) - 1
-                   for k in range(len(obj))])
-    contaminated = (n1 >= 2) & (flg < 2)
-
-    # "Good star" ellipticity ceiling at the candidate stage:
-    # ELLIPTICITY < 0.20 (with PSFEx SAMPLE_MAXELLIP=0.18 downstream).
-    # F115W A4 study: 153/167 (91.6%) of PSFEx-accepted "good stars"
-    # have SExtractor ELLIPTICITY<0.20.
+    # ── v2 (2026-07, user-approved on HST): hostgalxy-consistent stamp gate.
+    #    SPACE isolation = 10 x PSF_FWHM (any catalogue neighbour), 7-bit
+    #    gate with rejects persisted for the QA mosaics.  Diffraction-spike
+    #    stars (FLAGS>=2) remain eligible candidates — with the tuned
+    #    DEBLEND_MINCONT their spikes stay attached, so they carry no
+    #    deblended self-fragments to trip the neighbour rule.
+    from psf_gate import gate1, gate2, write_rejects
     ell_arr = np.asarray(obj['ELLIPTICITY'], float)
-    e_round = ell_arr < 0.20
-    star = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
-            & (fr > cut) & (fr < med + 2.5*std)
-            & e_round
-            & (~saturated) & (~edge) & (~contaminated) & (~gap_masked))
-    print(f'  stellar locus = {med:.3f} px  (MAD-σ {mad:.3f} px, '
-          f'iterative 3·MAD clipping)')
+    cand = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
+            & (fr > cut) & (fr < med + 2.5*std) & (ell_arr < 0.20))
+    midx = np.where(cand)[0]
+    print(f'  stellar locus = {med:.3f} px  (MAD-σ {mad:.3f} px)')
     print(f'  artifact cut  = locus − 3·MAD = {cut:.3f} px')
-    # base of candidates that pass everything EXCEPT the contam cut —
-    # gives the meaningful "candidates dropped by this cut" count.
-    pre_contam = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
-                  & (fr > cut) & (fr < med + 2.5*std)
-                  & e_round
-                  & (~saturated) & (~edge) & (~gap_masked))
-    dropped_by_contam = pre_contam & contaminated
-    # gap-masked candidates: pass everything except the gap test
-    pre_gap = ((cs > 0.8) & (snr > 100) & (elon < 1.5) & (fwhm > fwhm_min)
-               & (fr > cut) & (fr < med + 2.5*std)
-               & e_round & (~saturated) & (~edge))
-    dropped_by_gap = pre_gap & gap_masked
-    print(f'  PSF stars selected : {star.sum()}')
-    print(f'    of which deblend-flagged (spike) : {(star & (flg >= 2)).sum()}')
-    print(f'  excluded saturated (masked core)   : {saturated.sum()}')
-    print(f'  excluded gap-masked VIGNET         : {dropped_by_gap.sum()}'
-          f'  [of {pre_gap.sum()} candidates pre-gap-cut]')
-    print(f'  excluded contam (n_1≥2 AND FLAGS<2): {dropped_by_contam.sum()}'
-          f'  [of {pre_contam.sum()} candidates pre-cut]')
-    print(f'  min FLUX_RADIUS among stars        : {fr[star].min():.3f} px '
-          f'({"OK" if fr[star].min() > cut else "FAIL"} > cut {cut:.3f})')
+    print(f'  candidates after locus/ellipticity cuts: {len(midx)}'
+          f'  (spike-flagged: {(flg[midx] >= 2).sum()})')
+    if len(midx) < 10:
+        sys.exit(f'only {len(midx)} candidates — too sparse for a PSF model')
 
-    # ── 3. write filtered LDAC (in-place row filter preserves TDIM) ──
-    star_cat = out / f'stars_{band}.fits'
-    hcat[2].data = obj[star]
-    hcat.writeto(star_cat, overwrite=True)
-    print(f'  wrote {star_cat.name} ({star.sum()} stars)')
+    psf_size = 151 if chan == 'lw' else 101
+    g1 = gate1(sci, xx, yy, flg, midx, psf_fwhm_est, psf_size,
+               sat_flags=saturated[midx], badpix_flags=gap_masked[midx],
+               nbr_iso_fwhm=10.0)
+    midx1 = midx[~g1['bad']]
+    print(f"  isolation: R_nbr = 10 x {psf_fwhm_est:.2f} px = "
+          f"{g1['R_nbr']:.1f} px = {g1['R_nbr']*0.030:.2f}\"")
+    print(f"  gate-1: {g1['counts']} → {len(midx1)} survive")
+    if len(midx1) < 10:
+        sys.exit(f'only {len(midx1)} stars survive gate-1 — no PSF model')
 
-    # ── 4. PSFEx ──
-    # Per-band SAMPLE_FWHMRANGE scaled to the measured PSF FWHM.  The fixed
-    # config range (SW 1.5-4.0, LW 2.0-6.0) cut THROUGH the stellar locus
-    # for the wide LW PSFs: F444W PSF FWHM≈5.9 px but bright stars measure
-    # up to 8.7 px (resolved wings), so the 6.0 ceiling rejected ALL bright
-    # stars (the ones carrying the diffraction-spike signal).  Scale the
-    # window to [0.6, 2.5]×PSF_FWHM so bright stars are kept across bands.
     fwhm_lo = max(1.2, 0.6 * psf_fwhm_est)
     fwhm_hi = 2.5 * psf_fwhm_est
-    print('\n── PSFEx ──', flush=True)
+    star_cat = out / f'stars_{band}.fits'
+    hcat[2].data = obj[midx1]
+    hcat.writeto(star_cat, overwrite=True)
+    print('\n── PSFEx pass-2a (provisional, for asym/outer gates) ──', flush=True)
+    cmd = ['psfex', str(star_cat),
+           '-c', str(CONFIGS / f'psfex_jwst_{chan}.psfex'),
+           '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
+           '-CHECKIMAGE_TYPE', 'NONE']
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr[-1500:], file=sys.stderr); sys.exit('PSFEx pass2a failed')
+    psf = star_cat.with_suffix('.psf')
+    if not psf.exists():
+        alt = Path.cwd() / psf.name
+        if alt.exists(): shutil.move(alt, psf)
+
+    g2 = gate2(sci, xx, yy, midx1, psf, psf_size)
+    midx2 = midx1[~g2['bad']]
+    print(f"  gate-2: {g2['counts']} (asym thr {g2['asym_thr']*100:.1f}%) "
+          f"→ {len(midx2)} model stars"
+          f"  (spike-flagged kept: {(flg[midx2] >= 2).sum()})")
+    if len(midx2) < 5:
+        sys.exit(f'only {len(midx2)} model stars survive the gate — no PSF model')
+    n_rej = write_rejects(out / f'stars_rejected_{band}.fits',
+                          xx, yy, mag, midx, g1, midx1, g2)
+    print(f'  wrote stars_rejected_{band}.fits ({n_rej} rejects)')
+
+    # ── final PSFEx pass-2b: model + aligned OUTCAT (no check-images; the
+    #    QA mosaics are raw-cutout based) ──
+    hcat[2].data = obj[midx2]
+    hcat.writeto(star_cat, overwrite=True)
+    print(f'  wrote {star_cat.name} ({len(midx2)} model stars)')
+    print('\n── PSFEx pass-2b (final) ──', flush=True)
     print(f'  SAMPLE_FWHMRANGE = {fwhm_lo:.2f},{fwhm_hi:.2f} px '
           f'(scaled to PSF FWHM {psf_fwhm_est:.2f})')
     cmd = ['psfex', str(star_cat),
            '-c', str(CONFIGS / f'psfex_jwst_{chan}.psfex'),
            '-SAMPLE_FWHMRANGE', f'{fwhm_lo:.2f},{fwhm_hi:.2f}',
-           '-CHECKIMAGE_TYPE', 'RESIDUALS,PROTOTYPES,SNAPSHOTS,SAMPLES',
-           '-CHECKIMAGE_NAME',
-           f'{out}/resi.fits,{out}/proto.fits,{out}/snap.fits,{out}/samp.fits']
+           '-OUTCAT_TYPE', 'FITS_LDAC',
+           '-OUTCAT_NAME', str(out / f'outcat_{band}.fits'),
+           '-CHECKIMAGE_TYPE', 'NONE']
     t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(r.stderr[-1500:], file=sys.stderr); sys.exit('PSFEx failed')
-    psf = star_cat.with_suffix('.psf')
     if not psf.exists():
         alt = Path.cwd() / psf.name
         if alt.exists(): shutil.move(alt, psf)
@@ -369,6 +366,9 @@ def main():
     print(f'  wall {time.time()-t0:.1f}s')
     print(f'  PSF model: chi2={ph.get("CHI2",-1):.3f}  '
           f'FWHM={ph.get("PSF_FWHM",-1):.2f} px  accepted={ph.get("ACCEPTED","?")}')
+    star = np.zeros(len(obj), bool); star[midx2] = True
+    dropped_by_gap = np.zeros(len(obj), bool)
+    dropped_by_contam = np.zeros(len(obj), bool)
 
     # ── 5. diagnostic JSON ──
     meta = {
@@ -383,17 +383,22 @@ def main():
         'artifact_cut_px': float(cut),
         'artifact_cut_recipe': 'locus - 3 * MAD(tight base)',
         'n_psf_stars': int(star.sum()),
+        'n_model_stars': int(star.sum()),
         'n_spike_stars_kept': int((star & (flg >= 2)).sum()),
         'n_saturated_excluded': int(saturated.sum()),
-        'n_gap_masked_excluded': int(dropped_by_gap.sum()),
-        'n_contaminated_excluded': int(dropped_by_contam.sum()),
-        'contam_cut_recipe': 'n_1 >= 2 AND FLAGS < 2  (n_1 = neighbours within 1″)',
+        'nbr_iso_fwhm': 10.0,
+        'r_nbr_px': float(g1['R_nbr']),
+        'r_nbr_arcsec': float(g1['R_nbr'] * 0.030),
+        'n_candidates': int(len(midx)),
+        'n_rejected_gate': int(n_rej),
+        'gate_counts': {**g1['counts'], **g2['counts']},
+        'asym_threshold': float(g2['asym_thr']),
         'psf_chi2': float(ph.get('CHI2', -1)),
         'psf_fwhm_px': float(ph.get('PSF_FWHM', -1)),
         'psf_accepted': int(ph.get('ACCEPTED', -1)),
         'psf_model': str(psf),
-        'recipe': 'Tanaka+2023 COSMOS-Web; keep diffraction-spike stars; '
-                  'exclude masked-core saturated; artifact-cut FR floor',
+        'recipe': 'hostgalxy-consistent v2: 10xFWHM isolation + 7-bit stamp '
+                  'gate; keep diffraction-spike stars (Tanaka+2023 base)',
     }
     (out / f'psf_{band}.meta.json').write_text(json.dumps(meta, indent=2))
     print(f'\n[save] {out / f"psf_{band}.meta.json"}')

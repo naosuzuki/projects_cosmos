@@ -94,6 +94,53 @@ PILOT_SRC = {
 }
 
 
+# ── EXTERNAL record import (user directive 2026-07-05): Euclid VIS/NISP and
+# HSC pages SHOW the hostgalxy project's updated record (built there with the
+# 10xFWHM/gate recipe; VIS 30 / NISP-Y 30 / J,H 28 tiles; HSC = 10 tracts)
+# instead of rebuilding here.  Our v04 model files on exdisk1 are untouched
+# (the photometry chain still consumes them).  Re-running this script re-links
+# whatever their site currently holds — their record stays authoritative.
+EXTERNAL_ROOT = Path('/Users/suzuki/github/projects_hsc/html/qa_psf_cosmos')
+EXTERNAL_WORK = Path('/Users/suzuki/data/psf_v01')   # hostgalxy WORK root (SSD)
+# COSMOS tracts (their HSC/CLAUDS work is tract-level and mixes SXDS tracts
+# in the same WORK dirs — import only the COSMOS field)
+_COSMOS_TRACTS = {'9569', '9570', '9571', '9572', '9812', '9813', '9814',
+                  '10054', '10055', '10056'}
+EXTERNAL_SRC = {
+    'VIS':    ('site', 'euclid_vis'),
+    'NISP-Y': ('site', 'euclid_y'),
+    'NISP-J': ('site', 'euclid_j'),
+    'NISP-H': ('site', 'euclid_h'),
+    'HSC-g':  ('work', 'hsc_g'),
+    'HSC-r':  ('work', 'hsc_r2'),
+    'HSC-i':  ('work', 'hsc_i2'),
+    'HSC-z':  ('work', 'hsc_z'),
+    'HSC-y':  ('work', 'hsc_y'),
+}
+
+
+def external_dir(band: str, tile: str) -> Path:
+    style, key = EXTERNAL_SRC[band]
+    return (EXTERNAL_ROOT / 'plots' / key / tile if style == 'site'
+            else EXTERNAL_WORK / key / tile / 'psf')
+
+
+def external_tiles(band: str) -> list[str]:
+    style, key = EXTERNAL_SRC[band]
+    if style == 'site':
+        root = EXTERNAL_ROOT / 'plots' / key
+        if not root.is_dir():
+            return []
+        return [p.name for p in sorted(root.iterdir(), key=lambda p: _natkey(p.name))
+                if p.is_dir()]
+    root = EXTERNAL_WORK / key
+    if not root.is_dir():
+        return []
+    return [p.name for p in sorted(root.iterdir(), key=lambda p: _natkey(p.name))
+            if p.is_dir() and p.name in _COSMOS_TRACTS
+            and (p / 'psf' / 'psf_samples.png').exists()]
+
+
 def _natkey(name: str):
     """Natural sort key so tiles order A1,A2,..,A9,A10,B1,..,B10 (numeric-aware)
     rather than lexicographic A1,A10,A2.  Euclid numeric IDs sort numerically too.
@@ -132,12 +179,20 @@ def link_plots_for_tile(band: str, tile: str, instrument: str) -> dict[str, Path
     out_dir = HTML_DIR / 'plots' / band / tile
     out_dir.mkdir(parents=True, exist_ok=True)
     linked = {}
+    # external-record bands (Euclid/HSC) source every panel from the
+    # hostgalxy site copy — see EXTERNAL_SRC.
+    ext_dir = external_dir(band, tile) if band in EXTERNAL_SRC else None
     for panel, _ in PANELS:
         target = None
+        if ext_dir is not None:
+            for name in ([f'{panel}.png', 'neighbour_scatter.png']
+                         if panel == 'hist_n_means' else [f'{panel}.png']):
+                if (ext_dir / name).exists():
+                    target = ext_dir / name; break
         # the neighbour slot PREFERS the hostgalxy Δmag-vs-separation scatter;
         # the old neighbour-count histogram is only a fallback for tiles not
         # yet regenerated.
-        if panel == 'hist_n_means' and \
+        elif panel == 'hist_n_means' and \
                 (WORK / instrument / tile / 'psf' / 'neighbour_scatter.png').exists():
             target = WORK / instrument / tile / 'psf' / 'neighbour_scatter.png'
         elif (WORK / instrument / tile / 'psf' / f'{panel}.png').exists():
@@ -528,12 +583,26 @@ _TILEMAP_GRID = [
 ]
 
 
-def tilemap_rel(instrument: str, tile: str) -> str | None:
-    """Relative path of the tile's minimap (59_ --tilemaps), if rendered."""
+def tilemap_rel(instrument: str, tile: str, band: str | None = None) -> str | None:
+    """Relative path of the tile's minimap (59_ --tilemaps), if rendered.
+    External-record bands fall back to the hostgalxy site's tilemaps,
+    symlinked into ours on first use."""
     for prefix, grid in _TILEMAP_GRID:
         if instrument.startswith(prefix):
             rel = f'tilemaps/{grid}__{tile}.png'
-            return rel if (HTML_DIR / rel).exists() else None
+            if (HTML_DIR / rel).exists():
+                return rel
+            break
+    if band in EXTERNAL_SRC:
+        key = EXTERNAL_SRC[band][1]
+        src = EXTERNAL_ROOT / 'tilemaps' / f'{key}__{tile}.png'
+        if src.exists():
+            rel = f'tilemaps/{key}__{tile}.png'
+            dst = HTML_DIR / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if not (dst.is_symlink() or dst.exists()):
+                os.symlink(src, dst)
+            return rel
     return None
 
 
@@ -561,7 +630,7 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
                 )
             else:
                 cells.append(f'<td class="empty">—</td>')
-        tm = tilemap_rel(instrument, tile)
+        tm = tilemap_rel(instrument, tile, band)
         tm_html = (f'<br><img class="tilemap" src="{tm}" '
                    f'alt="{tile} sky location">' if tm else '')
         rows.append(f'<tr><td class="tile-name">{tile}{tm_html}</td>{"".join(cells)}</tr>')
@@ -625,7 +694,8 @@ def main():
 
     band_status = {}
     for band, label, instrument in BANDS:
-        tiles = discover_tiles(instrument)
+        tiles = (external_tiles(band) if band in EXTERNAL_SRC
+                 else discover_tiles(instrument))
         band_status[band] = len(tiles)
         write_band_page(band, label, instrument, tiles)
         print(f'  {band:6s}  {label:32s}  tiles={tiles or "[]"}')
