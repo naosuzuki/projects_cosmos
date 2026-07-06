@@ -1,5 +1,19 @@
 # HANDOFF — Step 3a state & next-session plan (2026-06-10)
 
+## ⚠️ 2026-07-05 — HST F814W PSF MODELS BEING REBUILT (v2 gate) — 3a-③ HST photometry should wait/rerun
+
+User-approved v2 recipe (commit e55fe2d2): hostgalxy-consistent star
+selection — SPACE isolation = 10 x PSF_FWHM (~1"), 7-bit stamp-quality
+gate (edge/nbr/bad-pix/blend/sat/asym/outer), rejects persisted to
+stars_rejected_<tile>.fits.  Model star counts drop ~290-360 → ~120-150
+per tile; stars_<tile>.psf and metas CHANGE for all 20 HST tiles.
+A1-A3+B5 done; remaining 16 running detached (log /tmp/hst_v2_rebuild.log,
+ETA ~4 h from 23:50).  Any 3a-③ photometry already run with v1 HST PSFs
+should be redone after this lands.  JWST + other space telescopes get the
+same 10xFWHM treatment next (user directive), then ground surveys'
+mosaics regenerate with the new raw-cutout QA style.
+
+
 ## ⚡⚡⚡⚡⚡ STATUS 2026-06-11 evening shutdown — mass production PAUSED mid-Euclid; plot-revision round pending
 
 The 69_ pass-1 driver and its auto-followup were STOPPED (user) before
