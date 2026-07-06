@@ -28,25 +28,54 @@ from scipy.spatial import cKDTree
 
 
 def gate1(sci, xx, yy, flg, midx, psf_fwhm_est, psf_size,
-          sat_flags, badpix_flags, nbr_iso_fwhm=10.0):
-    """Catalog/image detectors (bits 1,2,4,8,16) on candidate indices midx."""
+          sat_flags, badpix_flags, nbr_iso_fwhm=10.0,
+          mags=None, nbr_dmag=None, blend_core_excl_fwhm=0.0):
+    """Catalog/image detectors (bits 1,2,4,8,16) on candidate indices midx.
+
+    JWST adaptations (defaults keep the exact HST/hostgalxy behaviour):
+      nbr_dmag: when set (JWST: 6), a neighbour within R_nbr only counts if
+        it is brighter than star_mag + nbr_dmag — at COSMOS-Web depth almost
+        every position has an ultra-faint detection within 10 x FWHM(LW),
+        and a 1:250-flux neighbour is photometrically irrelevant to the fit.
+      blend_core_excl_fwhm: local maxima within this many FWHM of the centre
+        are PSF SELF-structure (Airy ring, spike knots) on the space PSFs —
+        exclude them from the second-peak blend count (JWST: 2.0)."""
     ny, nx = sci.shape
     Rs = psf_size // 2
     edge_b = ((xx[midx] < Rs) | (xx[midx] > nx - Rs) | (yy[midx] < Rs)
               | (yy[midx] > ny - Rs) | ((flg[midx] & 8) > 0))
     R_nbr = nbr_iso_fwhm * psf_fwhm_est
     _ok = np.isfinite(xx) & np.isfinite(yy)
-    tree = cKDTree(np.column_stack([xx[_ok], yy[_ok]]))
-    nbr_d = np.full(len(midx), np.inf)
-    _q = np.isfinite(xx[midx]) & np.isfinite(yy[midx])
-    if _q.any():
-        nbr_d[_q] = tree.query(
-            np.column_stack([xx[midx][_q], yy[midx][_q]]), k=2)[0][:, 1]
-    nbr_b = nbr_d < R_nbr
+    nbr_b = np.zeros(len(midx), bool)
+    if nbr_dmag is None:
+        tree = cKDTree(np.column_stack([xx[_ok], yy[_ok]]))
+        nbr_d = np.full(len(midx), np.inf)
+        _q = np.isfinite(xx[midx]) & np.isfinite(yy[midx])
+        if _q.any():
+            nbr_d[_q] = tree.query(
+                np.column_stack([xx[midx][_q], yy[midx][_q]]), k=2)[0][:, 1]
+        nbr_b = nbr_d < R_nbr
+    else:
+        mags = np.asarray(mags, float)
+        tree = cKDTree(np.column_stack([xx[_ok], yy[_ok]]))
+        okidx = np.where(_ok)[0]
+        for i in range(len(midx)):
+            k = midx[i]
+            if not (np.isfinite(xx[k]) and np.isfinite(yy[k])):
+                continue
+            for j in tree.query_ball_point([xx[k], yy[k]], R_nbr):
+                jj = okidx[j]
+                if jj == k:
+                    continue
+                if np.isfinite(mags[jj]) and mags[jj] < mags[k] + nbr_dmag:
+                    nbr_b[i] = True; break
     vmask_b = np.asarray(badpix_flags, bool)
     # (8) blend: >=2 local maxima in the minimally-smoothed raw core stamp
     Hc = 17
     rc = np.hypot(*np.mgrid[-Hc:Hc+1, -Hc:Hc+1]); em = rc > 14; smr = rc < 15
+    r_excl = blend_core_excl_fwhm * psf_fwhm_est
+    if r_excl > 0:
+        smr = smr & (rc > r_excl)
     peak_b = np.zeros(len(midx), bool)
     for i in range(len(midx)):
         xi = int(round(xx[midx[i]] - 1)); yi = int(round(yy[midx[i]] - 1))
@@ -57,8 +86,11 @@ def gate1(sci, xx, yy, flg, midx, psf_fwhm_est, psf_size,
         bgv = np.median(ss[em])
         nzv = 1.4826 * np.median(np.abs(ss[em] - bgv)) + 1e-9
         loc = ss == maximum_filter(ss, size=3)
-        peak_b[i] = int((loc & (ss > bgv + 8*nzv)
-                         & (ss > 0.04*ss.max()) & smr).sum()) >= 2
+        n_second = int((loc & (ss > bgv + 8*nzv)
+                        & (ss > 0.04*ss.max()) & smr).sum())
+        # with a core exclusion the centre peak itself is outside the search
+        # zone, so ONE significant off-core maximum already means a companion
+        peak_b[i] = n_second >= (1 if r_excl > 0 else 2)
     sat_b = np.asarray(sat_flags, bool)
     bad = edge_b | nbr_b | vmask_b | peak_b | sat_b
     reason = (edge_b.astype(int) + 2*nbr_b.astype(int) + 4*vmask_b.astype(int)
@@ -92,8 +124,12 @@ def psf_evaluator(psf_path, psf_size):
     return psf_at
 
 
-def gate2(sci, xx, yy, midx1, psf_path, psf_size):
-    """PSF-residual detectors vs a provisional model (bits 32 asym, 64 outer)."""
+def gate2(sci, xx, yy, midx1, psf_path, psf_size, exempt=None):
+    """PSF-residual detectors vs a provisional model (bits 32 asym, 64 outer).
+    exempt: boolean mask over midx1 — stars excluded from BOTH detectors.
+    JWST passes its bright / diffraction-spike stars (the documented science
+    signal of the model): their structured residuals are model imperfection,
+    not companions, and a faint companion is fractionally negligible there."""
     ny, nx = sci.shape
     psf_at = psf_evaluator(psf_path, psf_size)
     Hp = psf_at(float(np.median(xx[midx1])), float(np.median(yy[midx1]))).shape[0] // 2
@@ -132,6 +168,10 @@ def gate2(sci, xx, yy, midx1, psf_path, psf_size):
     asym_thr = max(0.05, float(np.percentile(asym_val[fin], 98))) \
         if int(fin.sum()) >= 50 else 0.05
     asym_b = fin & (asym_val > asym_thr)
+    if exempt is not None:
+        ex = np.asarray(exempt, bool)
+        asym_b &= ~ex
+        outer_b &= ~ex
     bad = asym_b | outer_b
     reason = 32*asym_b.astype(int) + 64*outer_b.astype(int)
     return dict(bad=bad, reason=reason, asym_thr=float(asym_thr),

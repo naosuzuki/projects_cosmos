@@ -302,9 +302,14 @@ def main():
         sys.exit(f'only {len(midx)} candidates — too sparse for a PSF model')
 
     psf_size = 151 if chan == 'lw' else 101
+    # JWST adaptations (documented in psf_gate.gate1): at COSMOS-Web depth a
+    # raw any-detection 10xFWHM rule leaves ~no LW stars, and the spiky space
+    # PSF fakes 'blend' second peaks — qualify neighbours by Δmag<6 and
+    # exclude the r<2xFWHM self-structure zone from the blend count.
     g1 = gate1(sci, xx, yy, flg, midx, psf_fwhm_est, psf_size,
                sat_flags=saturated[midx], badpix_flags=gap_masked[midx],
-               nbr_iso_fwhm=10.0)
+               nbr_iso_fwhm=10.0, mags=mag, nbr_dmag=6.0,
+               blend_core_excl_fwhm=2.0)
     midx1 = midx[~g1['bad']]
     print(f"  isolation: R_nbr = 10 x {psf_fwhm_est:.2f} px = "
           f"{g1['R_nbr']:.1f} px = {g1['R_nbr']*0.030:.2f}\"")
@@ -330,7 +335,11 @@ def main():
         alt = Path.cwd() / psf.name
         if alt.exists(): shutil.move(alt, psf)
 
-    g2 = gate2(sci, xx, yy, midx1, psf, psf_size)
+    # bright / diffraction-spike stars are the model's documented science
+    # signal — exempt them from the residual detectors (their structured
+    # residuals are model imperfection, not companions)
+    exempt = (snr[midx1] > 1000) | (flg[midx1] >= 2)
+    g2 = gate2(sci, xx, yy, midx1, psf, psf_size, exempt=exempt)
     midx2 = midx1[~g2['bad']]
     print(f"  gate-2: {g2['counts']} (asym thr {g2['asym_thr']*100:.1f}%) "
           f"→ {len(midx2)} model stars"
