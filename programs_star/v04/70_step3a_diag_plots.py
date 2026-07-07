@@ -323,6 +323,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--mission', required=True, choices=sorted(MISSIONS))
     ap.add_argument('--tile', required=True)
+    ap.add_argument('--force', action='store_true',
+                    help='accepted for 69_ driver compatibility (70_ always regenerates)')
     ap.add_argument('--band-ref', default=None,
                     help='band for plot-1 colors (default: 2nd band)')
     args = ap.parse_args()
