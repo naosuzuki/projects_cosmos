@@ -92,14 +92,18 @@ def main():
     band_upper = f"{cfg['label']} {args.tile}"
 
     with fits.open(scf) as h:
-        sci = np.nan_to_num(h[sce].data.astype(np.float32),
-                            nan=0.0, posinf=0.0, neginf=0.0)
+        sci = h[sce].data.astype(np.float64)
+        shd = h[sce].header
+    if 'BSOFTEN' in shd and 'BOFFSET' in shd:      # PS1 asinh → linear
+        sci = (shd['BOFFSET'] + shd['BSOFTEN'] * 2.0
+               * np.sinh(0.4 * np.log(10.0) * sci))
+    sci = np.nan_to_num(sci.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
     stars = fits.open(psf_dir / f'stars_{suffix}.fits')[2].data
     sx = np.asarray(stars['X_IMAGE'], float); sy = np.asarray(stars['Y_IMAGE'], float)
     smag = np.asarray(stars['MAG_AUTO'], float)
 
     # ── fit Piff on the gated stars (72_'s validated config) ──
-    stamp = args.stamp or (25 if pixscale < 0.05 else 21)
+    stamp = (args.stamp or (25 if pixscale < 0.05 else 21)) | 1   # odd window
     import piff
     samp = sci[::97, ::89].ravel(); samp = samp[np.isfinite(samp) & (samp != 0)]
     nvar = float(max(1.4826*np.median(np.abs(samp - np.median(samp))), 1e-12)**2)
@@ -116,18 +120,27 @@ def main():
                 'interp': {'type': 'BasisPolynomial', 'order': 2},
                 'outliers': {'type': 'Chisq', 'nsigma': 4.0, 'max_remove': 0.05}},
         'verbose': 0}
-    piff_psf = piff.process(config)
+    try:
+        piff_psf = piff.process(config)
+    except Exception as e:                          # noqa: BLE001
+        print(f'  PIFF FIT FAILED: {type(e).__name__}: {e}'); sys.exit(2)
     piff_psf.write(str(psf_dir / f'piff_{suffix}.piff'))
     print(f'  piff fit ok ({len(piff_psf.stars)} stars, stamp {stamp})')
 
-    def piff_at(X, Y):
+    def piff_at(X, Y):        # small window for the χ² CORE comparison
         return np.asarray(piff_psf.draw(x=X, y=Y, stamp_size=stamp).array, float)
 
+    # PSFEx at NATIVE sampling; raw_chi2 center-crops to the same ring as Piff
+    # (so panel 2 compares the core, not a rescaled model — a 25px-resampled
+    # PSFEx would squash the 101px model and fake a huge χ²).
     from psf_gate import psf_evaluator
     with fits.open(psf_dir / f'stars_{suffix}.psf') as _ph:
         _n = _ph[1].data['PSF_MASK'][0].shape[-1]
         native = int(round(_n * float(_ph[1].header.get('PSF_SAMP', 1.0)))) | 1
     pex_at = psf_evaluator(psf_dir / f'stars_{suffix}.psf', native)
+
+    def piff_at_native(X, Y):  # native window → residual mosaic matches PSFEx's
+        return np.asarray(piff_psf.draw(x=X, y=Y, stamp_size=native).array, float)
 
     # ── panel 2: mag vs chi2, both backends on the identical estimator ──
     H = stamp // 2
@@ -146,20 +159,27 @@ def main():
     print(f'  panel-2: PSFEx χ² med {np.median(chi_pex[ok]):.1f} → '
           f'Piff {np.median(chi_pif[ok]):.1f}')
 
-    # ── panel 5: residual mosaic vs Piff (56_ renderer, injected evaluator) ──
-    ocd = fits.open(psf_dir / f'outcat_{suffix}.fits')[2].data
+    # ── panel 5: residual mosaics vs PSFEx and vs Piff, SAME stamp window
+    #    (56_ renderer, injected evaluators).  Needs the outcat (skip if the
+    #    tile's outcat was cleaned away — panel 2 still stands). ──
+    outf = psf_dir / f'outcat_{suffix}.fits'
+    if not outf.exists():
+        print('  panel-5: SKIP (no outcat)'); return
+    ocd = fits.open(outf)[2].data
     mos = ocd[(np.asarray(ocd['FLAGS_PSF'], int) & 32) == 0]
     mag_mos = np.zeros(len(mos)); flg_mos = np.zeros(len(mos), int)
     for k in range(len(mos)):
         j = ((sx - mos['X_IMAGE'][k])**2 + (sy - mos['Y_IMAGE'][k])**2).argmin()
         mag_mos[k] = smag[j]
-    qa.plot_raw_mosaics(psf_dir / 'psf_samples_piff_ignore.png',
-                        psf_dir / 'psf_residuals_piff.png',
+    # Piff residual mosaic at the NATIVE window so it matches the existing
+    # psf_residuals.png (the PSFEx state) — a true model-only swap.
+    ign = psf_dir / 'psf_samples_piff_ignore.png'
+    qa.plot_raw_mosaics(ign, psf_dir / 'psf_residuals_piff.png',
                         psf_dir, sci, band_upper + ' [Piff]', suffix,
-                        mos, mag_mos, flg_mos, psf_at=piff_at)
-    (psf_dir / 'psf_samples_piff_ignore.png').unlink(missing_ok=True)
+                        mos, mag_mos, flg_mos, psf_at=piff_at_native)
+    ign.unlink(missing_ok=True)
     (psf_dir / 'psf_samples_piff_ignore_thumb.png').unlink(missing_ok=True)
-    print('  panel-5: psf_residuals_piff.png (+_thumb) written')
+    print('  panel-5: psf_residuals_piff.png (+_thumb, native window) written')
 
 
 if __name__ == '__main__':

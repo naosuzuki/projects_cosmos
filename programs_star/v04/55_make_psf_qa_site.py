@@ -712,6 +712,8 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
                                  f'data-piff="{linked["mag_vs_chi2_piff"]}"')
                     cell_img = linked.get('mag_vs_chi2_psfex', rel)
                 elif panel == 'psf_residuals' and 'psf_residuals_piff' in linked:
+                    # PSFEx state = existing native psf_residuals; Piff panel is
+                    # rendered at the same native window → true model-only swap.
                     data_attr = (f' class="switchable" '
                                  f'data-psfex="{cell_img}" '
                                  f'data-piff="{linked.get("psf_residuals_piff_thumb", linked["psf_residuals_piff"])}"')
