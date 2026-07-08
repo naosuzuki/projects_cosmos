@@ -410,6 +410,27 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
         return write_mosaic_viewer_page(band, tile, panel, panel_title,
                                         prev_tile, next_tile, prev_href,
                                         next_href, back_href, viewer_dir)
+    # mag_vs_chi2 gets a PSFEx/Piff model toggle when the Piff panel exists
+    model_btn2, model_js2 = '', ''
+    if panel == 'mag_vs_chi2' and \
+            (HTML_DIR / f'plots/{band}/{tile}/mag_vs_chi2_piff.png').exists():
+        img_from_viewer = f'../../../plots/{band}/{tile}/mag_vs_chi2_psfex.png'
+        _pf = f'../../../plots/{band}/{tile}/mag_vs_chi2_piff.png'
+        model_btn2 = ('<button id="modelbtn" style="background:#c0392b">'
+                      '&#8646; PSF model</button>'
+                      '<span class="pct">χ² PSF model:&nbsp;'
+                      '<b id="modellbl" class="pex">PSFEx</b></span>')
+        model_js2 = (
+            "var PEX='" + img_from_viewer + "', PIF='" + _pf + "', mdl='psfex';"
+            "var mlbl=document.getElementById('modellbl');"
+            "document.getElementById('modelbtn').onclick=function(){"
+            "mdl=(mdl==='psfex')?'piff':'psfex';img.onload=doFit;"
+            "img.src=(mdl==='psfex')?PEX:PIF;"
+            "mlbl.textContent=(mdl==='psfex')?'PSFEx':'Piff';"
+            "mlbl.className=(mdl==='psfex')?'pex':'pif';};"
+            "document.addEventListener('keydown',function(e){"
+            "if(e.key==='p'||e.key==='P'){e.preventDefault();"
+            "document.getElementById('modelbtn').click();}});")
     # line plots: zoombox viewer with TOGGLE click — one click zooms in at the
     # cursor, the next click returns to fit (like the tile minimaps).
     html = dedent(f'''
@@ -429,6 +450,7 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
             .zoomtools button:hover {{ background:#2c70c4; }}
             .zoomtools .pct {{ font-weight:600; min-width:46px; }}
             .zoomtools .hint {{ color:#666; }}
+            #modellbl.pex {{ color:#2c70c4; }}  #modellbl.pif {{ color:#c0392b; }}
             .zoombox {{ overflow:auto; width:100%; height:calc(100vh - 152px); background:#fff; }}
             .zoombox img {{ display:block; width:100%; cursor:zoom-in; }}
           </style>
@@ -449,6 +471,7 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
           <button id="fit">Fit width</button>
           <button id="one">1:1 pixels</button>
           <span class="pct" id="pct">100%</span>
+          {model_btn2}
           <span class="spacer"></span>
           <span class="hint">click = zoom in · click again = back · scroll to pan · ←/→ flip tiles</span>
         </div>
@@ -483,6 +506,7 @@ def write_viewer_page(band: str, tile: str, panel: str, panel_title: str,
             if (e.key === 'ArrowRight') location.href = '{next_href}';
             else if (e.key === 'ArrowLeft') location.href = '{prev_href}';
           }});
+          {model_js2}
         </script>
         </body></html>
     ''').strip()
@@ -501,9 +525,16 @@ def write_mosaic_viewer_page(band, tile, panel, panel_title, prev_tile,
     samples⇄residuals while PRESERVING the zoom and scroll position."""
     samp_rel = f'../../../plots/{band}/{tile}/psf_samples.png'
     resi_rel = f'../../../plots/{band}/{tile}/psf_residuals.png'
+    resi_piff_rel = f'../../../plots/{band}/{tile}/psf_residuals_piff.png'
+    has_piff = (HTML_DIR / f'plots/{band}/{tile}/psf_residuals_piff.png').exists()
     start = 'samples' if panel == 'psf_samples' else 'residuals'
     start_src = samp_rel if panel == 'psf_samples' else resi_rel
     start_lbl = 'Samples' if panel == 'psf_samples' else 'Residuals'
+    # PSF-model toggle (residuals only) — spells out PSFEx/Piff
+    model_btn = (('<button id="modelbtn" class="modelsw">&#8646; PSF model</button>'
+                  '<span class="pct">residual PSF model:&nbsp;'
+                  '<b id="modellbl" class="pex">PSFEx</b></span>')
+                 if has_piff else '')
     html = dedent(f'''
         <!doctype html>
         <html><head>
@@ -521,8 +552,12 @@ def write_mosaic_viewer_page(band, tile, panel, panel_title, prev_tile,
             .zoomtools button:hover {{ background:#2c70c4; }}
             .zoomtools button.swap {{ background:#5cb85c; }}
             .zoomtools button.swap:hover {{ background:#449d44; }}
+            .zoomtools button.modelsw {{ background:#c0392b; }}
+            .zoomtools button.modelsw:hover {{ background:#96271b; }}
             .zoomtools .pct {{ font-weight:600; min-width:46px; }}
             .zoomtools .hint {{ color:#666; }}
+            #modellbl.pex {{ color:#2c70c4; }}  #modellbl.pif {{ color:#c0392b; }}
+            #modellbl.na {{ color:#999; font-weight:400; }}
             .zoombox {{ overflow:auto; width:100%; height:calc(100vh - 152px); background:#111; }}
             .zoombox img {{ display:block; width:100%; cursor:zoom-in; }}
           </style>
@@ -538,7 +573,7 @@ def write_mosaic_viewer_page(band, tile, panel, panel_title, prev_tile,
           </div>
         </header>
         <div class="zoomtools">
-          <button id="swapbtn" class="swap">&#8646; Samples / Residuals</button><span class="pct">showing&nbsp;<b id="whichlbl">{start_lbl}</b></span>
+          <button id="swapbtn" class="swap">&#8646; Samples / Residuals</button><span class="pct">showing&nbsp;<b id="whichlbl">{start_lbl}</b></span>{model_btn}
           <button id="zout">– Zoom out</button>
           <button id="zin">+ Zoom in</button>
           <button id="fit">Fit width</button>
@@ -572,21 +607,43 @@ def write_mosaic_viewer_page(band, tile, panel, panel_title, prev_tile,
             if (e.key === 'ArrowRight') location.href = '{next_href}';
             else if (e.key === 'ArrowLeft') location.href = '{prev_href}';
           }});
-          var PAIR={{samples:'{samp_rel}', residuals:'{resi_rel}'}};
-          var curImg='{start}', lbl=document.getElementById('whichlbl');
-          function swapImg(){{
+          var SAMP='{samp_rel}';
+          var RESI={{psfex:'{resi_rel}', piff:'{resi_piff_rel}'}};
+          var curImg='{start}', model='psfex';
+          var lbl=document.getElementById('whichlbl');
+          var mlbl=document.getElementById('modellbl');
+          function curSrc(){{ return curImg==='samples' ? SAMP : RESI[model]; }}
+          function setMlbl(){{
+            if(!mlbl) return;
+            if(curImg==='samples'){{ mlbl.textContent='n/a (raw data)'; mlbl.className='na'; }}
+            else {{ mlbl.textContent=(model==='psfex')?'PSFEx':'Piff';
+                    mlbl.className=(model==='psfex')?'pex':'pif'; }}
+          }}
+          function loadSrc(src, updLbl){{
             var fx=(box.scrollLeft+box.clientWidth/2)/(img.naturalWidth*scale);
             var fy=(box.scrollTop+box.clientHeight/2)/(img.naturalHeight*scale);
-            curImg=(curImg==='samples')?'residuals':'samples';
             img.onload=function(){{render();
               box.scrollLeft=fx*img.naturalWidth*scale-box.clientWidth/2;
               box.scrollTop =fy*img.naturalHeight*scale-box.clientHeight/2;
-              lbl.textContent=(curImg==='samples')?'Samples':'Residuals';}};
-            img.src=PAIR[curImg];
+              updLbl();}};
+            img.src=src;
+          }}
+          function swapImg(){{
+            curImg=(curImg==='samples')?'residuals':'samples';
+            loadSrc(curSrc(), function(){{
+              lbl.textContent=(curImg==='samples')?'Samples':'Residuals'; setMlbl(); }});
+          }}
+          function swapModel(){{
+            model=(model==='psfex')?'piff':'psfex';
+            if(curImg==='residuals') loadSrc(curSrc(), setMlbl); else setMlbl();
           }}
           document.getElementById('swapbtn').onclick=swapImg;
+          var mbtn=document.getElementById('modelbtn');
+          if(mbtn) mbtn.onclick=swapModel;
+          setMlbl();
           document.addEventListener('keydown',function(e){{
             if(e.key===' '||e.key==='x'||e.key==='X'){{e.preventDefault();swapImg();}}
+            else if((e.key==='p'||e.key==='P')&&mbtn){{e.preventDefault();swapModel();}}
           }});
         </script>
         </body></html>
