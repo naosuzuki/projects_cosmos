@@ -7,6 +7,11 @@
 # record, so Piff panels in our tree would not attach to the toggle.
 set -u
 cd /Users/suzuki/github/projects_cosmos/programs_star/v04
+# Cap the Piff fit's BLAS/OpenMP fan-out to 2 cores (of 14) so a
+# concurrently-running SExtractor keeps the rest.  The PixelGrid lstsq
+# otherwise spins up one thread per core and saturates the CPU.
+export OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 \
+       VECLIB_MAXIMUM_THREADS=2 NUMEXPR_NUM_THREADS=2
 PY=/opt/miniconda3/bin/python
 W=/Volumes/exdisk1/data/photometry_v04
 LOG=/tmp/piff; mkdir -p $LOG
