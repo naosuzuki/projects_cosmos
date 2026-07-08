@@ -607,7 +607,7 @@ def plot_saturation_peak(out_png, mag, peak, cs, snr, ncoremask, band_upper,
 
 
 def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
-                     mos, mag_mos, flg_mos, max_show=None):
+                     mos, mag_mos, flg_mos, max_show=None, psf_at=None):
     """Sample + residual mosaics from RAW science cutouts at the model stars'
     positions (projects_hsc/hostgalxy qa_plots.py recipe — reliable cell↔star
     mapping, no PSFEx check-image files needed):
@@ -682,26 +682,29 @@ def plot_raw_mosaics(samp_png, resi_png, psf_dir, sci, band_upper, suffix,
     if max_show is not None:
         items = items[:max_show]
 
-    # PSF model: PSF_MASK polynomial from the builder's .psf, PSF_SAMP resample
-    pp = fits.open(psf_dir / f'stars_{suffix}.psf')[1]
-    hd = pp.header
-    mk = np.asarray(pp.data['PSF_MASK'][0], float)
-    deg = int(hd.get('POLDEG1', 0)); ps = hd['PSF_SAMP']
-    x0 = float(hd.get('POLZERO1', 0.0)); xsc = float(hd.get('POLSCAL1', 1.0))
-    y0 = float(hd.get('POLZERO2', 0.0)); ysc = float(hd.get('POLSCAL2', 1.0))
-    if mk.ndim == 2:                     # constant PSF stored as a bare 2D image
-        mk = mk[None, ...]
+    # PSF model: PSF_MASK polynomial from the builder's .psf, PSF_SAMP resample.
+    # An injected `psf_at` (e.g. a Piff evaluator) overrides this, so the SAME
+    # residual-mosaic renderer draws either backend for a like-for-like toggle.
+    if psf_at is None:
+        pp = fits.open(psf_dir / f'stars_{suffix}.psf')[1]
+        hd = pp.header
+        mk = np.asarray(pp.data['PSF_MASK'][0], float)
+        deg = int(hd.get('POLDEG1', 0)); ps = hd['PSF_SAMP']
+        x0 = float(hd.get('POLZERO1', 0.0)); xsc = float(hd.get('POLSCAL1', 1.0))
+        y0 = float(hd.get('POLZERO2', 0.0)); ysc = float(hd.get('POLSCAL2', 1.0))
+        if mk.ndim == 2:                 # constant PSF stored as a bare 2D image
+            mk = mk[None, ...]
 
-    def psf_at(x, y):
-        dx = (x - x0) / xsc; dy = (y - y0) / ysc; t = []
-        for j in range(deg + 1):
-            for i in range(deg + 1 - j):
-                t.append(dx**i * dy**j)
-        p = np.tensordot(np.array(t), mk, axes=(0, 0))
-        if abs(ps - 1) > 1e-3:           # oversampled → resample to ODD native px
-            tgt = int(round(p.shape[0] * ps)) | 1
-            p = zoom(p, tgt / p.shape[0], order=3)
-        return p
+        def psf_at(x, y):
+            dx = (x - x0) / xsc; dy = (y - y0) / ysc; t = []
+            for j in range(deg + 1):
+                for i in range(deg + 1 - j):
+                    t.append(dx**i * dy**j)
+            p = np.tensordot(np.array(t), mk, axes=(0, 0))
+            if abs(ps - 1) > 1e-3:       # oversampled → resample to ODD native px
+                tgt = int(round(p.shape[0] * ps)) | 1
+                p = zoom(p, tgt / p.shape[0], order=3)
+            return p
 
     ny, nx = sci.shape
     H = psf_at(float(np.median(xs_)), float(np.median(ys_))).shape[0] // 2

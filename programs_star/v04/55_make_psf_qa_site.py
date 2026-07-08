@@ -219,6 +219,19 @@ def link_plots_for_tile(band: str, tile: str, instrument: str) -> dict[str, Path
                     tdst.unlink()
                 os.symlink(tsrc, tdst)
                 linked[f'{panel}_thumb'] = f'plots/{band}/{tile}/{panel}_thumb.png'
+    # PSFEx/Piff variants of the two MODEL-DEPENDENT panels (73_make_piff_panels.py):
+    #   mag_vs_chi2 → mag_vs_chi2_{psfex,piff}.png   (fair raw-stamp χ², both)
+    #   psf_residuals → psf_residuals_piff.png (+_thumb); PSFEx state = default
+    src_dir = WORK / instrument / tile / 'psf'
+    for extra in ('mag_vs_chi2_psfex', 'mag_vs_chi2_piff',
+                  'psf_residuals_piff', 'psf_residuals_piff_thumb'):
+        s = src_dir / f'{extra}.png'
+        if s.exists():
+            d = out_dir / f'{extra}.png'
+            if d.is_symlink() or d.exists():
+                d.unlink()
+            os.symlink(s, d)
+            linked[extra] = f'plots/{band}/{tile}/{extra}.png'
     return linked
 
 
@@ -278,6 +291,16 @@ def write_css():
         table.tiles tbody td.tile-name img.tilemap:hover {
           box-shadow:0 0 0 2px #4a90e2;
         }
+        .psf-toggle { display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+          padding:8px 28px; background:#eef0f3; border-bottom:1px solid #ddd;
+          font-size:14px; }
+        .psf-toggle button { background:#5cb85c; color:#fff; border:0;
+          border-radius:5px; padding:6px 13px; font-size:14px; cursor:pointer; }
+        .psf-toggle button:hover { background:#449d44; }
+        .psf-toggle button:disabled { background:#bbb; cursor:not-allowed; }
+        .psf-toggle .hint { color:#666; }
+        #psflbl.pex { color:#2c70c4; }
+        #psflbl.pif { color:#c0392b; }
         .tm-lightbox { display:none; position:fixed; inset:0; z-index:1000;
           cursor:zoom-out; background:rgba(0,0,0,0.82);
           align-items:center; justify-content:center; }
@@ -623,9 +646,21 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
                 # mosaics: the band-page cell shows the ≤16-row _thumb (the
                 # full mosaic can be hundreds of rows); the viewer shows full.
                 cell_img = linked.get(f'{panel}_thumb', rel)
+                # the two MODEL-DEPENDENT panels carry PSFEx/Piff variants for
+                # the top toggle; data-* attrs let the JS swap src per backend.
+                data_attr = ''
+                if panel == 'mag_vs_chi2' and 'mag_vs_chi2_piff' in linked:
+                    data_attr = (f' class="switchable" '
+                                 f'data-psfex="{linked.get("mag_vs_chi2_psfex", rel)}" '
+                                 f'data-piff="{linked["mag_vs_chi2_piff"]}"')
+                    cell_img = linked.get('mag_vs_chi2_psfex', rel)
+                elif panel == 'psf_residuals' and 'psf_residuals_piff' in linked:
+                    data_attr = (f' class="switchable" '
+                                 f'data-psfex="{cell_img}" '
+                                 f'data-piff="{linked.get("psf_residuals_piff_thumb", linked["psf_residuals_piff"])}"')
                 cells.append(
                     f'<td class="panel"><a href="{viewer_rel}">'
-                    f'<span class="thumb-box"><img src="{cell_img}" alt="{panel}"/></span>'
+                    f'<span class="thumb-box"><img src="{cell_img}"{data_attr} alt="{panel}"/></span>'
                     f'</a></td>'
                 )
             else:
@@ -652,6 +687,13 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
         <header>
           <h1>PSF QA — {label}  <span style="font-weight:400; font-size:14px;">[<a href="index.html">← back</a>]</span></h1>
         </header>
+        <div class="psf-toggle">
+          <button id="psfbtn">&#8646; Switch PSF model</button>
+          <span>PSF model shown for <b>Mag&nbsp;vs&nbsp;χ²</b> &amp;
+            <b>PSF&nbsp;Residuals</b>:
+            <b id="psflbl" class="pex">PSFEx</b></span>
+          <span class="hint">(the other 4 panels are model-independent)</span>
+        </div>
         <div class="wrap">
           {body_extra}
           <table class="tiles">
@@ -674,6 +716,19 @@ def write_band_page(band: str, label: str, instrument: str, tiles: list[str]):
           document.addEventListener('keydown', function(e){{
             if (e.key === 'Escape') document.getElementById('tmlb').style.display = 'none';
           }});
+          // PSFEx ⇄ Piff toggle for the two model-dependent panels
+          var backend='psfex', lbl=document.getElementById('psflbl');
+          var sw=document.querySelectorAll('img.switchable');
+          var btn=document.getElementById('psfbtn');
+          if(!sw.length){{ btn.disabled=true;
+            btn.title='no Piff panels generated for this band yet'; }}
+          btn.onclick=function(){{
+            backend=(backend==='psfex')?'piff':'psfex';
+            sw.forEach(function(im){{
+              var s=im.getAttribute('data-'+backend); if(s) im.src=s; }});
+            lbl.textContent=(backend==='psfex')?'PSFEx':'Piff';
+            lbl.className=(backend==='psfex')?'pex':'pif';
+          }};
         </script>
         </body></html>
     ''').strip()
