@@ -111,7 +111,7 @@ def main():
     # model stars and the Piff PixelGrid fit + outlier iterations scale with
     # that count (unWISE 1800 → >10 min).  The brightest few hundred fully
     # constrain a PixelGrid; more just add faint noise and cost.
-    FITMAX = 600
+    FITMAX = 400
     fsel = np.argsort(smag)[:FITMAX] if len(smag) > FITMAX else np.arange(len(smag))
     fx, fy = sx[fsel], sy[fsel]
     catf = psf_dir / f'piff_incat_{suffix}.fits'
@@ -154,7 +154,7 @@ def main():
     # model stars, and the per-star χ² + neighbour loops + mosaic render blow
     # the driver's per-tile timeout.  The bright cap is the informative sample
     # (faint stars are noise-dominated) and is applied to BOTH backends.
-    NMAX = 500
+    NMAX = 400
     sel = np.argsort(smag)[:NMAX] if len(smag) > NMAX else np.arange(len(smag))
     cx, cy, cmag = sx[sel], sy[sel], smag[sel]
     H = stamp // 2
@@ -191,7 +191,7 @@ def main():
     ign = psf_dir / 'psf_samples_piff_ignore.png'
     qa.plot_raw_mosaics(ign, psf_dir / 'psf_residuals_piff.png',
                         psf_dir, sci, band_upper + ' [Piff]', suffix,
-                        mos, mag_mos, flg_mos, psf_at=piff_at_native, max_show=600)
+                        mos, mag_mos, flg_mos, psf_at=piff_at_native, max_show=250)
     ign.unlink(missing_ok=True)
     (psf_dir / 'psf_samples_piff_ignore_thumb.png').unlink(missing_ok=True)
     print('  panel-5: psf_residuals_piff.png (+_thumb, native window) written')
