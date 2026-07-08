@@ -107,10 +107,17 @@ def main():
     import piff
     samp = sci[::97, ::89].ravel(); samp = samp[np.isfinite(samp) & (samp != 0)]
     nvar = float(max(1.4826*np.median(np.abs(samp - np.median(samp))), 1e-12)**2)
+    # Fit on the brightest FITMAX stars only: WISE/ground tiles carry ~1800
+    # model stars and the Piff PixelGrid fit + outlier iterations scale with
+    # that count (unWISE 1800 → >10 min).  The brightest few hundred fully
+    # constrain a PixelGrid; more just add faint noise and cost.
+    FITMAX = 600
+    fsel = np.argsort(smag)[:FITMAX] if len(smag) > FITMAX else np.arange(len(smag))
+    fx, fy = sx[fsel], sy[fsel]
     catf = psf_dir / f'piff_incat_{suffix}.fits'
     fits.BinTableHDU.from_columns([
-        fits.Column(name='x', format='D', array=sx),
-        fits.Column(name='y', format='D', array=sy)]).writeto(catf, overwrite=True)
+        fits.Column(name='x', format='D', array=fx),
+        fits.Column(name='y', format='D', array=fy)]).writeto(catf, overwrite=True)
     config = {
         'input': {'image_file_name': scf, 'image_hdu': sce,
                   'cat_file_name': str(catf), 'cat_hdu': 1,
@@ -143,21 +150,29 @@ def main():
         return np.asarray(piff_psf.draw(x=X, y=Y, stamp_size=native).array, float)
 
     # ── panel 2: mag vs chi2, both backends on the identical estimator ──
+    # Cap to the brightest NMAX stars: crowded WISE/ground tiles carry ~1800
+    # model stars, and the per-star χ² + neighbour loops + mosaic render blow
+    # the driver's per-tile timeout.  The bright cap is the informative sample
+    # (faint stars are noise-dominated) and is applied to BOTH backends.
+    NMAX = 500
+    sel = np.argsort(smag)[:NMAX] if len(smag) > NMAX else np.arange(len(smag))
+    cx, cy, cmag = sx[sel], sy[sel], smag[sel]
     H = stamp // 2
-    chi_pex = raw_chi2(sci, sx, sy, pex_at, H)
-    chi_pif = raw_chi2(sci, sx, sy, piff_at, H)
-    tree = cKDTree(np.column_stack([sx, sy]))
+    chi_pex = raw_chi2(sci, cx, cy, pex_at, H)
+    chi_pif = raw_chi2(sci, cx, cy, piff_at, H)
+    tree = cKDTree(np.column_stack([sx, sy]))          # neighbours vs ALL stars
     r1 = 1.0 / pixscale; r3 = 3.0 / pixscale
-    n1 = np.array([len(tree.query_ball_point([sx[k], sy[k]], r1)) - 1 for k in range(len(sx))])
-    n3 = np.array([len(tree.query_ball_point([sx[k], sy[k]], r3)) - 1 for k in range(len(sx))])
-    flg0 = np.zeros(len(sx), int)
+    n1 = np.array([len(tree.query_ball_point([cx[k], cy[k]], r1)) - 1 for k in range(len(cx))])
+    n3 = np.array([len(tree.query_ball_point([cx[k], cy[k]], r3)) - 1 for k in range(len(cx))])
+    flg0 = np.zeros(len(cx), int)
     ok = np.isfinite(chi_pex) & np.isfinite(chi_pif)
-    qa.plot_mag_vs_chi2(psf_dir / 'mag_vs_chi2_psfex.png', smag[ok], chi_pex[ok],
-                        n1[ok], n3[ok], flg0[ok], band_upper + ' — PSFEx (raw-stamp χ²)')
-    qa.plot_mag_vs_chi2(psf_dir / 'mag_vs_chi2_piff.png', smag[ok], chi_pif[ok],
-                        n1[ok], n3[ok], flg0[ok], band_upper + ' — Piff (raw-stamp χ²)')
+    _cap = f' (brightest {NMAX})' if len(smag) > NMAX else ''
+    qa.plot_mag_vs_chi2(psf_dir / 'mag_vs_chi2_psfex.png', cmag[ok], chi_pex[ok],
+                        n1[ok], n3[ok], flg0[ok], band_upper + ' — PSFEx (raw-stamp χ²)' + _cap)
+    qa.plot_mag_vs_chi2(psf_dir / 'mag_vs_chi2_piff.png', cmag[ok], chi_pif[ok],
+                        n1[ok], n3[ok], flg0[ok], band_upper + ' — Piff (raw-stamp χ²)' + _cap)
     print(f'  panel-2: PSFEx χ² med {np.median(chi_pex[ok]):.1f} → '
-          f'Piff {np.median(chi_pif[ok]):.1f}')
+          f'Piff {np.median(chi_pif[ok]):.1f}  (n={int(ok.sum())})')
 
     # ── panel 5: residual mosaics vs PSFEx and vs Piff, SAME stamp window
     #    (56_ renderer, injected evaluators).  Needs the outcat (skip if the
@@ -176,7 +191,7 @@ def main():
     ign = psf_dir / 'psf_samples_piff_ignore.png'
     qa.plot_raw_mosaics(ign, psf_dir / 'psf_residuals_piff.png',
                         psf_dir, sci, band_upper + ' [Piff]', suffix,
-                        mos, mag_mos, flg_mos, psf_at=piff_at_native)
+                        mos, mag_mos, flg_mos, psf_at=piff_at_native, max_show=600)
     ign.unlink(missing_ok=True)
     (psf_dir / 'psf_samples_piff_ignore_thumb.png').unlink(missing_ok=True)
     print('  panel-5: psf_residuals_piff.png (+_thumb, native window) written')

@@ -49,7 +49,7 @@ echo "worklist: $N tile-suffixes" >> $LOG/loop.log
 i=0
 while read -r inst tile suffix; do
   i=$((i+1))
-  run_to 420 taskpolicy -c utility $PY 73_make_piff_panels.py \
+  run_to 900 taskpolicy -c utility $PY 73_make_piff_panels.py \
       --instrument "$inst" --tile "$tile" --suffix "$suffix" \
       >>$LOG/last.txt 2>&1
   rc=$?
