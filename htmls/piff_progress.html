@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piff Panel Progress · COSMOS PSF</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171b22; --panel2:#1e242d; --line:#2a313c;
+    --tx:#e7edf5; --mut:#8b97a7; --track:#232a34; --accent:#4b9bff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:26px 20px 60px}
+  h1{font-size:20px;font-weight:650;margin:0 0 2px;letter-spacing:.2px}
+  .sub{color:var(--mut);font-size:12.5px;margin-bottom:22px}
+  .sub b{color:var(--tx);font-weight:600}
+
+  .cur{display:flex;align-items:center;gap:14px;background:var(--panel);
+       border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+  .cur .dot{width:11px;height:11px;border-radius:50%;flex:none;
+            box-shadow:0 0 0 0 rgba(75,155,255,.55);animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(75,155,255,.5)}
+                   70%{box-shadow:0 0 0 9px rgba(75,155,255,0)}
+                   100%{box-shadow:0 0 0 0 rgba(75,155,255,0)}}
+  .cur .lab{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px}
+  .cur .val{font-size:17px;font-weight:600;margin-top:1px}
+  .cur .val small{color:var(--mut);font-weight:500;font-size:13px}
+
+  .overall{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+           padding:16px 18px 18px;margin-bottom:26px}
+  .overall .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+  .overall .pct{font-size:26px;font-weight:700;letter-spacing:.3px}
+  .overall .frac{color:var(--mut);font-size:13px}
+  .obar{height:14px;background:var(--track);border-radius:8px;overflow:hidden}
+  .obar > i{display:block;height:100%;border-radius:8px;
+            background:linear-gradient(90deg,#3a7bd5,#4b9bff);transition:width .6s ease}
+
+  .grp{margin-bottom:20px}
+  .grp h2{font-size:12.5px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);
+          margin:0 0 9px;display:flex;align-items:center;gap:8px}
+  .grp h2 .sw{width:9px;height:9px;border-radius:2px;flex:none}
+  .grp h2 .gp{margin-left:auto;color:var(--mut);letter-spacing:.3px;font-weight:600;text-transform:none;font-size:12px}
+  .rows{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .row{display:grid;grid-template-columns:64px 1fr 132px;align-items:center;gap:14px;
+       padding:9px 16px;border-top:1px solid var(--line)}
+  .row:first-child{border-top:none}
+  .row.active{background:var(--panel2)}
+  .row .bn{font-weight:600;font-size:13.5px}
+  .row .bn .live{font-size:10px;color:var(--accent);margin-left:6px;font-weight:600;
+                 vertical-align:middle;letter-spacing:.4px}
+  .bar{height:10px;background:var(--track);border-radius:6px;overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:6px;transition:width .6s ease}
+  .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--mut);font-size:12.5px}
+  .num b{color:var(--tx);font-weight:600}
+
+  .foot{display:flex;align-items:center;gap:10px;color:var(--mut);font-size:12px;margin-top:8px}
+  .foot .sdot{width:8px;height:8px;border-radius:50%;background:#5ec96b}
+  .foot .sdot.down{background:#ff6b6b}
+  .foot .stale{color:#e0a94a}
+  .note{color:var(--mut);font-size:11.5px;margin-top:6px;opacity:.85}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Piff Panel Progress</h1>
+  <div class="sub">COSMOS empirical PSF · generating the <b>Piff</b> counterparts of the model-dependent QA panels across every served filter · auto-refresh 8&nbsp;s</div>
+
+  <div class="cur" id="cur">
+    <span class="dot" id="curdot"></span>
+    <div>
+      <div class="lab">Currently building</div>
+      <div class="val" id="curval">waiting for data…</div>
+    </div>
+  </div>
+
+  <div class="overall">
+    <div class="top">
+      <span class="pct" id="opct">—</span>
+      <span class="frac" id="ofrac"></span>
+    </div>
+    <div class="obar"><i id="ofill" style="width:0%"></i></div>
+  </div>
+
+  <div id="groups"></div>
+
+  <div class="foot">
+    <span class="sdot" id="sdot"></span>
+    <span id="fstat">connecting…</span>
+    <span id="fstale"></span>
+  </div>
+  <div class="note">Bars count tiles with a Piff residual panel. A few PS1/ground tiles are <em>no-coverage</em> stubs (&lt;10 Gaia stars, no PSF model); those can't produce a panel, so a couple of bands settle just under 100%.</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+async function tick(){
+  try{
+    const r = await fetch('piff_progress.json?t=' + Date.now(), {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    render(d);
+  }catch(e){
+    $('fstat').textContent = 'no data yet ('+e.message+')';
+    $('sdot').classList.add('down');
+  }
+}
+
+function render(d){
+  // current
+  if(d.current){
+    const c = d.current;
+    $('curdot').style.background = c.color;
+    $('curdot').style.boxShadow = '0 0 0 0 ' + c.color;
+    $('curval').innerHTML = `${esc(c.group)} · ${esc(c.band)}-band `
+      + `<small>tile ${esc(c.tile)}</small>`;
+  }else{
+    $('curval').textContent = d.driver_up ? 'scanning…' : 'idle — driver not running';
+  }
+
+  // overall
+  const o = d.overall;
+  $('opct').textContent = o.pct + '%';
+  $('ofrac').textContent = o.done.toLocaleString() + ' / ' + o.total.toLocaleString() + ' panels';
+  $('ofill').style.width = o.pct + '%';
+
+  // groups
+  const byG = {};
+  d.bands.forEach(b => (byG[b.group] = byG[b.group] || []).push(b));
+  const cur = d.current || {};
+  let html = '';
+  d.group_order.forEach(g => {
+    const arr = byG[g]; if(!arr) return;
+    const col = d.group_color[g] || '#888';
+    const gd = arr.reduce((s,b)=>s+b.done,0), gt = arr.reduce((s,b)=>s+b.total,0);
+    html += `<div class="grp"><h2><span class="sw" style="background:${col}"></span>${esc(g)}`
+          + `<span class="gp">${gd}/${gt} · ${gt?Math.round(100*gd/gt):0}%</span></h2><div class="rows">`;
+    arr.forEach(b => {
+      const active = cur.inst === b.inst;
+      html += `<div class="row${active?' active':''}">`
+        + `<div class="bn">${esc(b.band)}${active?'<span class="live">● LIVE</span>':''}</div>`
+        + `<div class="bar"><i style="width:${b.pct}%;background:${b.color}"></i></div>`
+        + `<div class="num"><b>${b.done}</b> / ${b.total} &nbsp;${b.pct}%</div>`
+        + `</div>`;
+    });
+    html += `</div></div>`;
+  });
+  $('groups').innerHTML = html;
+
+  // footer
+  const age = Math.max(0, Math.floor(Date.now()/1000) - (d.updated_epoch||0));
+  $('sdot').classList.toggle('down', !d.driver_up);
+  $('fstat').textContent = (d.driver_up ? 'driver running' : 'driver stopped')
+      + ' · updated ' + d.updated + (d.fails ? ' · ' + d.fails + ' skipped/failed' : '');
+  $('fstale').textContent = age > 40 ? ('feed stale ('+age+'s)') : '';
+  $('fstale').className = age > 40 ? 'stale' : '';
+}
+
+tick();
+setInterval(tick, 8000);
+</script>
+</body>
+</html>
