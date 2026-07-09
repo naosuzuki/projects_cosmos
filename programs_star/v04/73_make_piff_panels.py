@@ -81,6 +81,15 @@ def main():
     suffix = args.suffix or args.tile
     psf_dir = WORK / args.instrument / args.tile / 'psf'
     meta = json.loads((psf_dir / f'psf_{suffix}.meta.json').read_text())
+    # no_coverage stub: the ground builders (54_*_{ps1,lsdr10,sdss,unwise})
+    # write a minimal meta and exit WITHOUT a PSF model when a tile has
+    # <10 Gaia-anchored locus stars.  A stale .psf can linger and pull the
+    # tile into the worklist, but there is no model to compare — skip
+    # cleanly (mirrors 56_'s guard) instead of KeyError on sci_source_file.
+    if meta.get('status') == 'no_coverage' or meta.get('n_model_stars', 1) == 0:
+        print(f'  [skip] {args.instrument}/{args.tile}: no_coverage stub '
+              f'(no PSF model — {meta.get("n_locus_stars", "?")} locus stars)')
+        return
     scf, sce = meta['sci_source_file'], int(meta.get('sci_source_ext', 0))
     pixscale = float(meta.get('pixel_scale_arcsec')
                      or meta.get('pixscale_arcsec') or 0.030)
@@ -118,8 +127,29 @@ def main():
     fits.BinTableHDU.from_columns([
         fits.Column(name='x', format='D', array=fx),
         fits.Column(name='y', format='D', array=fy)]).writeto(catf, overwrite=True)
+    # Piff must fit the SAME image we score against.  For asinh-scaled data
+    # (PS1) the raw file is NON-LINEAR; pointing Piff at it while giving the
+    # linear noise level makes its effective noise floor ~300x too high, so
+    # its Chisq outlier pass rejects all but the brightest stars — and on
+    # star-poor tiles rejects EVERY star ("No stars left to fit").  Fitting a
+    # PSF in asinh space is also wrong in principle.  So for asinh data we
+    # hand Piff the unscaled `sci` (written to SSD, which also spares My Book
+    # a 2nd full read).  Linear data (HST/JWST/unWISE) is passed through as
+    # before — unchanged, so their existing panels stay valid.
+    is_asinh = ('BSOFTEN' in shd and 'BOFFSET' in shd)
+    imgf = None
+    if is_asinh:
+        imgf = Path('/tmp/piff') / f'img_{args.instrument}_{suffix}.fits'
+        imgf.parent.mkdir(parents=True, exist_ok=True)
+        _hdr = shd.copy()
+        for _k in ('BZERO', 'BSCALE'):
+            _hdr.remove(_k, ignore_missing=True)
+        fits.writeto(imgf, sci, header=_hdr, overwrite=True)
+        img_name, img_hdu = str(imgf), 0
+    else:
+        img_name, img_hdu = scf, sce
     config = {
-        'input': {'image_file_name': scf, 'image_hdu': sce,
+        'input': {'image_file_name': img_name, 'image_hdu': img_hdu,
                   'cat_file_name': str(catf), 'cat_hdu': 1,
                   'x_col': 'x', 'y_col': 'y',
                   'stamp_size': stamp + 8, 'noise': nvar},
@@ -130,7 +160,11 @@ def main():
     try:
         piff_psf = piff.process(config)
     except Exception as e:                          # noqa: BLE001
+        if imgf is not None:
+            imgf.unlink(missing_ok=True)
         print(f'  PIFF FIT FAILED: {type(e).__name__}: {e}'); sys.exit(2)
+    if imgf is not None:
+        imgf.unlink(missing_ok=True)               # source no longer needed
     piff_psf.write(str(psf_dir / f'piff_{suffix}.piff'))
     print(f'  piff fit ok ({len(piff_psf.stars)} stars, stamp {stamp})')
 
