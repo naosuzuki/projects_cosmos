@@ -30,9 +30,11 @@ OUT     = Path('/Users/suzuki/github/projects_cosmos/htmls/piff_progress.json')
 LOG     = Path('/tmp/piff/loop.log')
 WORKTXT = Path('/tmp/piff/work.txt')
 
-GROUP_ORDER = ['HST', 'JWST', 'unWISE', 'PS1', 'LS DR10', 'SDSS']
+HSC_ROOT = Path('/Users/suzuki/data/psf_v01')
+GROUP_ORDER = ['HST', 'JWST', 'unWISE', 'HSC', 'PS1', 'LS DR10', 'SDSS']
 GROUP_COLOR = {'HST': '#f2a13d', 'JWST': '#33c9b7', 'unWISE': '#b07cf0',
-               'PS1': '#4b9bff', 'LS DR10': '#5ec96b', 'SDSS': '#ff6b6b'}
+               'HSC': '#e879b8', 'PS1': '#4b9bff', 'LS DR10': '#5ec96b',
+               'SDSS': '#ff6b6b'}
 BAND_ORDER = {b: i for i, b in enumerate(
     ['F814W', 'F115W', 'F150W', 'F277W', 'F444W', 'W1', 'W2',
      'g', 'r', 'i', 'z', 'y', 'u'])}
@@ -42,6 +44,7 @@ def label(inst: str):
     if inst.startswith('hst'):            return 'HST', 'F814W'
     if inst.startswith('jwst_nircam_'):   return 'JWST', inst.split('_')[-1].upper()
     if inst.startswith('unwise_'):        return 'unWISE', inst.split('_')[-1].upper()
+    if inst.startswith('hsc_'):           return 'HSC', inst.replace('hsc_', '').rstrip('2')
     if inst.startswith('ps1_'):           return 'PS1', inst.split('_')[-1]
     if inst.startswith('lsdr10_'):        return 'LS DR10', inst.split('_')[-1]
     if inst.startswith('sdss_'):          return 'SDSS', inst.split('_')[-1]
@@ -88,8 +91,9 @@ def driver_alive():
 def snapshot_base():
     """One-time: panels present at the driver's launch, per instrument."""
     present = defaultdict(int)
-    for p in WORK.glob('*/*/psf/psf_residuals_piff.png'):
-        present[p.parts[-4]] += 1        # .../<inst>/<tile>/psf/<png>
+    for base_root in (WORK, HSC_ROOT):   # HSC panels live in the psf_v01 tree
+        for p in base_root.glob('*/*/psf/psf_residuals_piff.png'):
+            present[p.parts[-4]] += 1    # .../<inst>/<tile>/psf/<png>
     ok0, _, _ = ok_counts()
     insts = set(present) | set(ok0)
     return {i: max(0, present.get(i, 0) - ok0.get(i, 0)) for i in insts}

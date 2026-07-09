@@ -77,10 +77,21 @@ def main():
     ap.add_argument('--tile', required=True)
     ap.add_argument('--suffix', default=None)
     ap.add_argument('--stamp', type=int, default=None)
+    ap.add_argument('--root', default=None,
+                    help='WORK root override (HSC record lives on the SSD)')
+    ap.add_argument('--flat', action='store_true',
+                    help='suffix-less layout (HSC record: stars.psf / psf.meta.json, '
+                         'no PSFEx outcat)')
     args = ap.parse_args()
+    FLAT = args.flat
     suffix = args.suffix or args.tile
-    psf_dir = WORK / args.instrument / args.tile / 'psf'
-    meta = json.loads((psf_dir / f'psf_{suffix}.meta.json').read_text())
+    root = Path(args.root) if args.root else WORK
+    psf_dir = root / args.instrument / args.tile / 'psf'
+
+    def _fn(base, ext):                    # stars_<suffix>.psf  vs  stars.psf (flat)
+        return f'{base}.{ext}' if FLAT else f'{base}_{suffix}.{ext}'
+
+    meta = json.loads((psf_dir / _fn('psf', 'meta.json')).read_text())
     # no_coverage stub: the ground builders (54_*_{ps1,lsdr10,sdss,unwise})
     # write a minimal meta and exit WITHOUT a PSF model when a tile has
     # <10 Gaia-anchored locus stars.  A stale .psf can linger and pull the
@@ -97,7 +108,10 @@ def main():
     qa = _load('56_make_psf_qa_plots_single')
     tp = _load('72_test_piff')
     qa.PIX = pixscale
-    cfg = qa.INSTRUMENTS[args.instrument]
+    cfg = qa.INSTRUMENTS.get(args.instrument)
+    if cfg is None:                        # HSC record dirs are hsc_i2 / hsc_r2 …
+        b = args.instrument.replace('hsc_', '').rstrip('2')
+        cfg = {'label': f'HSC {b}'}
     band_upper = f"{cfg['label']} {args.tile}"
 
     with fits.open(scf) as h:
@@ -107,7 +121,8 @@ def main():
         sci = (shd['BOFFSET'] + shd['BSOFTEN'] * 2.0
                * np.sinh(0.4 * np.log(10.0) * sci))
     sci = np.nan_to_num(sci.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
-    stars = fits.open(psf_dir / f'stars_{suffix}.fits')[2].data
+    _sh = fits.open(psf_dir / _fn('stars', 'fits'))
+    stars = _sh[2].data if len(_sh) > 2 else _sh[1].data   # LDAC ext2, else ext1
     sx = np.asarray(stars['X_IMAGE'], float); sy = np.asarray(stars['Y_IMAGE'], float)
     smag = np.asarray(stars['MAG_AUTO'], float)
 
@@ -123,7 +138,7 @@ def main():
     FITMAX = 400
     fsel = np.argsort(smag)[:FITMAX] if len(smag) > FITMAX else np.arange(len(smag))
     fx, fy = sx[fsel], sy[fsel]
-    catf = psf_dir / f'piff_incat_{suffix}.fits'
+    catf = psf_dir / _fn('piff_incat', 'fits')
     fits.BinTableHDU.from_columns([
         fits.Column(name='x', format='D', array=fx),
         fits.Column(name='y', format='D', array=fy)]).writeto(catf, overwrite=True)
@@ -138,7 +153,7 @@ def main():
     # before — unchanged, so their existing panels stay valid.
     is_asinh = ('BSOFTEN' in shd and 'BOFFSET' in shd)
     imgf = None
-    if is_asinh:
+    if is_asinh or FLAT:      # asinh→fit linear; FLAT/HSC→spare My Book a 2nd 1.8GB read
         imgf = Path('/tmp/piff') / f'img_{args.instrument}_{suffix}.fits'
         imgf.parent.mkdir(parents=True, exist_ok=True)
         _hdr = shd.copy()
@@ -165,7 +180,7 @@ def main():
         print(f'  PIFF FIT FAILED: {type(e).__name__}: {e}'); sys.exit(2)
     if imgf is not None:
         imgf.unlink(missing_ok=True)               # source no longer needed
-    piff_psf.write(str(psf_dir / f'piff_{suffix}.piff'))
+    piff_psf.write(str(psf_dir / _fn('piff', 'piff')))
     print(f'  piff fit ok ({len(piff_psf.stars)} stars, stamp {stamp})')
 
     def piff_at(X, Y):        # small window for the χ² CORE comparison
@@ -175,10 +190,10 @@ def main():
     # (so panel 2 compares the core, not a rescaled model — a 25px-resampled
     # PSFEx would squash the 101px model and fake a huge χ²).
     from psf_gate import psf_evaluator
-    with fits.open(psf_dir / f'stars_{suffix}.psf') as _ph:
+    with fits.open(psf_dir / _fn('stars', 'psf')) as _ph:
         _n = _ph[1].data['PSF_MASK'][0].shape[-1]
         native = int(round(_n * float(_ph[1].header.get('PSF_SAMP', 1.0)))) | 1
-    pex_at = psf_evaluator(psf_dir / f'stars_{suffix}.psf', native)
+    pex_at = psf_evaluator(psf_dir / _fn('stars', 'psf'), native)
 
     def piff_at_native(X, Y):  # native window → residual mosaic matches PSFEx's
         return np.asarray(piff_psf.draw(x=X, y=Y, stamp_size=native).array, float)
@@ -211,15 +226,26 @@ def main():
     # ── panel 5: residual mosaics vs PSFEx and vs Piff, SAME stamp window
     #    (56_ renderer, injected evaluators).  Needs the outcat (skip if the
     #    tile's outcat was cleaned away — panel 2 still stands). ──
-    outf = psf_dir / f'outcat_{suffix}.fits'
-    if not outf.exists():
+    outf = psf_dir / _fn('outcat', 'fits')
+    if outf.exists():
+        ocd = fits.open(outf)[2].data
+        mos = ocd[(np.asarray(ocd['FLAGS_PSF'], int) & 32) == 0]
+        mag_mos = np.zeros(len(mos)); flg_mos = np.zeros(len(mos), int)
+        for k in range(len(mos)):
+            j = ((sx - mos['X_IMAGE'][k])**2 + (sy - mos['Y_IMAGE'][k])**2).argmin()
+            mag_mos[k] = smag[j]
+    elif FLAT:
+        # HSC record keeps no PSFEx outcat — mosaic the gated model stars
+        # themselves (brightest first), all accepted (no reject frames).
+        # plot_raw_mosaics needs X_IMAGE/Y_IMAGE/FLAGS_PSF, which the raw
+        # stars.fits lacks — build a minimal structured array (FLAGS_PSF=0).
+        order = np.argsort(smag)
+        mos = np.zeros(len(order), dtype=[('X_IMAGE', 'f8'),
+                                          ('Y_IMAGE', 'f8'), ('FLAGS_PSF', 'i4')])
+        mos['X_IMAGE'] = sx[order]; mos['Y_IMAGE'] = sy[order]
+        mag_mos = smag[order]; flg_mos = np.zeros(len(order), int)
+    else:
         print('  panel-5: SKIP (no outcat)'); return
-    ocd = fits.open(outf)[2].data
-    mos = ocd[(np.asarray(ocd['FLAGS_PSF'], int) & 32) == 0]
-    mag_mos = np.zeros(len(mos)); flg_mos = np.zeros(len(mos), int)
-    for k in range(len(mos)):
-        j = ((sx - mos['X_IMAGE'][k])**2 + (sy - mos['Y_IMAGE'][k])**2).argmin()
-        mag_mos[k] = smag[j]
     # Piff residual mosaic at the NATIVE window so it matches the existing
     # psf_residuals.png (the PSFEx state) — a true model-only swap.
     ign = psf_dir / 'psf_samples_piff_ignore.png'

@@ -222,7 +222,9 @@ def link_plots_for_tile(band: str, tile: str, instrument: str) -> dict[str, Path
     # PSFEx/Piff variants of the two MODEL-DEPENDENT panels (73_make_piff_panels.py):
     #   mag_vs_chi2 → mag_vs_chi2_{psfex,piff}.png   (fair raw-stamp χ², both)
     #   psf_residuals → psf_residuals_piff.png (+_thumb); PSFEx state = default
-    src_dir = WORK / instrument / tile / 'psf'
+    # HSC's variants live beside its record panels (psf_v01), not in WORK — so
+    # for external bands source them from ext_dir (73_ --flat writes them there).
+    src_dir = ext_dir if ext_dir is not None else (WORK / instrument / tile / 'psf')
     for extra in ('mag_vs_chi2_psfex', 'mag_vs_chi2_piff',
                   'psf_residuals_piff', 'psf_residuals_piff_thumb'):
         s = src_dir / f'{extra}.png'
