@@ -65,12 +65,18 @@ echo "worklist: $N tile-suffixes" >> $LOG/loop.log
 i=0
 while read -r inst tile suffix flat root; do
   i=$((i+1))
-  extra=()
-  [ "${flat:-}" = "flat" ] && extra=(--flat --root "$root")
   wroot="${root:-$W}"
-  run_to 900 taskpolicy -c utility $PY 73_make_piff_panels.py \
-      --instrument "$inst" --tile "$tile" --suffix "$suffix" "${extra[@]}" \
-      >>$LOG/last.txt 2>&1
+  # NB: macOS bash 3.2 makes "${arr[@]}" on an EMPTY array fatal under set -u,
+  # so branch explicitly instead of splatting an optional-args array.
+  if [ "${flat:-}" = "flat" ]; then
+    run_to 900 taskpolicy -c utility $PY 73_make_piff_panels.py \
+        --instrument "$inst" --tile "$tile" --suffix "$suffix" --flat --root "$root" \
+        >>$LOG/last.txt 2>&1
+  else
+    run_to 900 taskpolicy -c utility $PY 73_make_piff_panels.py \
+        --instrument "$inst" --tile "$tile" --suffix "$suffix" \
+        >>$LOG/last.txt 2>&1
+  fi
   rc=$?
   if [ $rc -eq 0 ] && [ -e "$wroot/$inst/$tile/psf/psf_residuals_piff.png" ]; then
     echo "OK   $i/$N $inst $tile $suffix" >> $LOG/loop.log
