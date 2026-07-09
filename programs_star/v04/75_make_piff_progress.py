@@ -101,7 +101,16 @@ def snapshot_base():
 
 def main():
     base = snapshot_base()
+    cyc = 0
     while True:
+        cyc += 1
+        # Re-baseline every ~160 s: `base` is a snapshot of panels-present at
+        # the driver's launch, so a driver RELAUNCH (which resets loop.log)
+        # would otherwise leave already-finished bands mis-counted until the
+        # generator is restarted.  Re-snapshotting makes done == present again
+        # (one light My Book metadata glob every ~20 cycles).
+        if cyc % 20 == 0:
+            base = snapshot_base()
         wl = worklist_counts()
         ok, fails, last = ok_counts()
 
