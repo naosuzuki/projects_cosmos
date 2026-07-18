@@ -71,10 +71,14 @@ def ref_radec(df: pd.DataFrame, ref_tag: str, fb_tag: str):
     return ra, dec
 
 
-def quiver_one(combo: str, cat: str, vmax_override=None) -> None:
+def quiver_one(combo: str, cat: str, vmax_override=None, clip_len=False) -> None:
     m1, m2, ref_tag, fb_tag, baseline, vmax, scale = COMBOS[combo]
     if vmax_override is not None:               # force a specific |mu| colour range
         vmax = vmax_override
+    if clip_len:                                # clip the DRAWN length at vmax too, so
+        scale = 20 * vmax                       # a star >=vmax is uniform in BOTH length
+                                                # and colour; rescale to the long-baseline
+                                                # panels' arrow size (scale=300 at vmax=15).
     df = pd.read_parquet(DATA / f'refined_{combo}_with_pm_v02.parquet')
     sel = category_mask(df, cat) & df['pmra'].notna() & df['pmdec'].notna()
     sub = df[sel].copy()
@@ -90,20 +94,27 @@ def quiver_one(combo: str, cat: str, vmax_override=None) -> None:
         cc = rng.choice(cc, N_SHOW, replace=False)
     n_show = len(cc) + len(gs)
 
+    def _disp(idx, cap):                        # cap the drawn arrow length at `cap` mas/yr
+        u, v = pmra[idx], pmdec[idx]
+        if cap is None:
+            return u, v
+        p = np.hypot(u, v)
+        s = np.where(p > cap, cap / p, 1.0)
+        return u * s, v * s
+
     fig, ax = plt.subplots(figsize=(11, 9.2))
     ax.axhline(2.2, color='0.88', lw=0.8, zorder=0)       # COSMOS survey strip
     head = dict(headwidth=4.2, headlength=5.2, headaxislength=4.6)
 
     q = None
     if len(cc):
-        q = ax.quiver(ra[cc], dec[cc], pmra[cc], pmdec[cc], pmtot[cc],
+        u, v = _disp(cc, vmax if clip_len else None)
+        q = ax.quiver(ra[cc], dec[cc], u, v, pmtot[cc],
                       cmap='coolwarm', clim=(0, vmax), scale=scale,
                       width=0.0028, alpha=0.9, zorder=2, **head)
-    if len(gs):                                           # dotted, display-capped
-        cap = 3 * vmax
-        p = np.hypot(pmra[gs], pmdec[gs])
-        s = np.where(p > cap, cap / p, 1.0)
-        q2 = ax.quiver(ra[gs], dec[gs], pmra[gs] * s, pmdec[gs] * s, pmtot[gs],
+    if len(gs):                                           # dotted supplements
+        u, v = _disp(gs, vmax if clip_len else 3 * vmax)
+        q2 = ax.quiver(ra[gs], dec[gs], u, v, pmtot[gs],
                        cmap='coolwarm', clim=(0, vmax), scale=scale,
                        width=0.002, alpha=0.75, linestyle=':', linewidths=0.7,
                        zorder=3, **head)
@@ -136,16 +147,18 @@ def quiver_one(combo: str, cat: str, vmax_override=None) -> None:
     print(f'  wrote {out.name}  (cat_cat {len(cc):,}, Gaia-supp {len(gs):,})')
 
 
-def main(combo: str = 'HST_JWST', vmax_override=None) -> None:
+def main(combo: str = 'HST_JWST', vmax_override=None, clip_len=False) -> None:
     m1, m2, *_ = COMBOS[combo]
     print(f'{m1}->{m2} PM quiver from refined_{combo}_with_pm_v02.parquet'
-          + (f'  (|mu| scale 0-{vmax_override:g})' if vmax_override else ''))
+          + (f'  (|mu| scale 0-{vmax_override:g})' if vmax_override else '')
+          + ('  [length-clipped]' if clip_len else ''))
     for cat in CATEGORIES:
-        quiver_one(combo, cat, vmax_override)
+        quiver_one(combo, cat, vmax_override, clip_len)
     print('Done.')
 
 
 if __name__ == '__main__':
     _combo = sys.argv[1] if len(sys.argv) > 1 else 'HST_JWST'
     _vmax = float(sys.argv[2]) if len(sys.argv) > 2 else None
-    main(_combo, _vmax)
+    _clip = len(sys.argv) > 3 and sys.argv[3].lower() in ('clip', 'true', '1', 'yes')
+    main(_combo, _vmax, _clip)
