@@ -1,17 +1,20 @@
 #!/usr/bin/env python
 """
-80_pm_quiver_hst_jwst.py — ACS→JWST proper-motion quiver plot.
+80_pm_quiver_hst_jwst.py — single-pair proper-motion quiver plot (styled).
 
-Reproduces the v01 styled quiver (programs_star/v01/58_pm_quiver_styled.py)
-for the HST-ACS → JWST pair, from the corrected v02 pair catalog, with
-Suzuki's matplotlib conventions (Times, inward ticks on all four sides).
+Reproduces the v01 styled quiver from the corrected v02 pair catalogs with
+Suzuki's matplotlib conventions (Times, inward ticks on all four sides) and
+enlarged axis fonts.  Default pair is ACS->JWST; pass a combo key for any pair:
 
-  data : csvfiles_star/v02/refined_HST_JWST_with_pm_v02.parquet
-  style: coolwarm, clim=(0,15), scale=300, dec=2.2 survey line, RA inverted,
-         cat_cat arrows solid + down-sampled to 1500; Gaia supplements dotted.
-  out  : htmls/pm_v04/pm_HST_JWST_quiver_{all,stars,agn_qso}.png
+  python 80_pm_quiver_hst_jwst.py                    # ACS -> JWST
+  python 80_pm_quiver_hst_jwst.py JWST_Euclid_VIS    # JWST -> Euclid
+  python 80_pm_quiver_hst_jwst.py HST_Euclid_VIS     # ACS  -> Euclid
+
+  data : csvfiles_star/v02/refined_<combo>_with_pm_v02.parquet
+  out  : htmls/pm_v04/pm_<combo>_quiver_{all,stars,agn_qso}.png
 """
 from __future__ import annotations
+import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -35,13 +38,19 @@ plt.rcParams.update({'font.family': 'serif',
 LBL, TTL, CBLBL, CBTICK, NOTE = 30, 24, 26, 18, 17
 
 ROOT = Path('/Users/suzuki/github/projects_cosmos')
-DATA = ROOT / 'csvfiles_star' / 'v02' / 'refined_HST_JWST_with_pm_v02.parquet'
+DATA = ROOT / 'csvfiles_star' / 'v02'
 OUT  = ROOT / 'htmls' / 'pm_v04'
-
-M1, M2 = 'ACS', 'JWST'            # m2 = reference frame
-BASELINE, VMAX, SCALE = '19 yr', 15, 300
 N_SHOW = 1500
 CATEGORIES = ['all', 'stars', 'agn_qso']
+
+# combo -> (m1, m2, ref_tag, fallback_tag, baseline, vmax, scale)
+COMBOS = {
+    'HST_JWST':         ('ACS',  'JWST',   'jwst', 'hst',  '19 yr',   15,  300),
+    'HST_Euclid_VIS':   ('ACS',  'Euclid', 'vis',  'hst',  '19.5 yr', 15,  300),
+    'HST_Euclid_NISP':  ('ACS',  'Euclid', 'nisp', 'hst',  '19.5 yr', 15,  300),
+    'JWST_Euclid_VIS':  ('JWST', 'Euclid', 'vis',  'jwst', '0.5 yr', 120, 2000),
+    'JWST_Euclid_NISP': ('JWST', 'Euclid', 'nisp', 'jwst', '0.5 yr', 120, 2000),
+}
 
 
 def category_mask(df: pd.DataFrame, cat: str) -> pd.Series:
@@ -54,26 +63,26 @@ def category_mask(df: pd.DataFrame, cat: str) -> pd.Series:
     raise ValueError(cat)
 
 
-def ref_radec(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    """JWST reference positions, falling back to HST where JWST is missing."""
-    ra, dec = df['cat_ra_jwst'].values.copy(), df['cat_dec_jwst'].values.copy()
+def ref_radec(df: pd.DataFrame, ref_tag: str, fb_tag: str):
+    """Reference-mission cat positions, falling back where they are missing."""
+    ra, dec = df[f'cat_ra_{ref_tag}'].values.copy(), df[f'cat_dec_{ref_tag}'].values.copy()
     miss = ~np.isfinite(ra)
-    ra[miss], dec[miss] = df['cat_ra_hst'].values[miss], df['cat_dec_hst'].values[miss]
+    ra[miss], dec[miss] = df[f'cat_ra_{fb_tag}'].values[miss], df[f'cat_dec_{fb_tag}'].values[miss]
     return ra, dec
 
 
-def quiver_one(df: pd.DataFrame, cat: str) -> None:
-    finite = df['pmra'].notna() & df['pmdec'].notna()
-    sel = category_mask(df, cat) & finite
+def quiver_one(combo: str, cat: str) -> None:
+    m1, m2, ref_tag, fb_tag, baseline, vmax, scale = COMBOS[combo]
+    df = pd.read_parquet(DATA / f'refined_{combo}_with_pm_v02.parquet')
+    sel = category_mask(df, cat) & df['pmra'].notna() & df['pmdec'].notna()
     sub = df[sel].copy()
     if len(sub) == 0:
         print(f'  [{cat}] no rows — skip'); return
 
-    ra, dec = ref_radec(sub)
+    ra, dec = ref_radec(sub, ref_tag, fb_tag)
     pmra, pmdec, pmtot = sub['pmra'].values, sub['pmdec'].values, sub['pmtot'].values
-    is_cc = sub['pm_method'].values == 'cat_cat'          # cross-epoch measurement
-    cc = np.where(is_cc)[0]
-    gs = np.where(~is_cc)[0]                               # Gaia supplements
+    is_cc = sub['pm_method'].values == 'cat_cat'
+    cc, gs = np.where(is_cc)[0], np.where(~is_cc)[0]
     rng = np.random.default_rng(0)
     if len(cc) > N_SHOW:
         cc = rng.choice(cc, N_SHOW, replace=False)
@@ -86,18 +95,17 @@ def quiver_one(df: pd.DataFrame, cat: str) -> None:
     q = None
     if len(cc):
         q = ax.quiver(ra[cc], dec[cc], pmra[cc], pmdec[cc], pmtot[cc],
-                      cmap='coolwarm', clim=(0, VMAX), scale=SCALE,
+                      cmap='coolwarm', clim=(0, vmax), scale=scale,
                       width=0.0028, alpha=0.9, zorder=2, **head)
     if len(gs):                                           # dotted, display-capped
-        cap = 3 * VMAX
+        cap = 3 * vmax
         p = np.hypot(pmra[gs], pmdec[gs])
         s = np.where(p > cap, cap / p, 1.0)
         q2 = ax.quiver(ra[gs], dec[gs], pmra[gs] * s, pmdec[gs] * s, pmtot[gs],
-                       cmap='coolwarm', clim=(0, VMAX), scale=SCALE,
+                       cmap='coolwarm', clim=(0, vmax), scale=scale,
                        width=0.002, alpha=0.75, linestyle=':', linewidths=0.7,
                        zorder=3, **head)
-        if q is None:
-            q = q2
+        q = q or q2
 
     cb = plt.colorbar(q, ax=ax, pad=0.02, fraction=0.046)
     cb.set_label(r'$|\mu|$  (mas yr$^{-1}$)', fontsize=CBLBL, labelpad=10)
@@ -110,8 +118,8 @@ def quiver_one(df: pd.DataFrame, cat: str) -> None:
     ax.tick_params(pad=7)
 
     tag = {'all': '', 'stars': '  (stars)', 'agn_qso': '  (AGN / QSO)'}.get(cat, '')
-    ax.set_title(f'ACS $\\rightarrow$ JWST proper motion{tag}', fontsize=TTL, pad=14)
-    note = (f'{BASELINE} baseline\nN = {int(sel.sum()):,} stars\n{n_show:,} shown'
+    ax.set_title(f'{m1} $\\rightarrow$ {m2} proper motion{tag}', fontsize=TTL, pad=14)
+    note = (f'{baseline} baseline\nN = {int(sel.sum()):,} stars\n{n_show:,} shown'
             + (f'\nGaia-supp {len(gs):,}' if len(gs) else ''))
     ax.text(0.025, 0.975, note, transform=ax.transAxes, va='top', ha='left',
             fontsize=NOTE, linespacing=1.5,
@@ -120,19 +128,19 @@ def quiver_one(df: pd.DataFrame, cat: str) -> None:
 
     fig.tight_layout()
     OUT.mkdir(parents=True, exist_ok=True)
-    out = OUT / f'pm_HST_JWST_quiver_{cat}.png'
+    out = OUT / f'pm_{combo}_quiver_{cat}.png'
     fig.savefig(out, dpi=150)
     plt.close(fig)
     print(f'  wrote {out.name}  (cat_cat {len(cc):,}, Gaia-supp {len(gs):,})')
 
 
-def main():
-    df = pd.read_parquet(DATA)
-    print(f'ACS→JWST PM quiver from {DATA.name}  ({len(df):,} rows)')
+def main(combo: str = 'HST_JWST') -> None:
+    m1, m2, *_ = COMBOS[combo]
+    print(f'{m1}->{m2} PM quiver from refined_{combo}_with_pm_v02.parquet')
     for cat in CATEGORIES:
-        quiver_one(df, cat)
+        quiver_one(combo, cat)
     print('Done.')
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else 'HST_JWST')
