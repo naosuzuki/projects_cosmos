@@ -35,7 +35,7 @@ plt.rcParams.update({'font.family': 'serif',
                      'xtick.major.width': 1.2, 'ytick.major.width': 1.2,
                      'xtick.minor.width': 0.9, 'ytick.minor.width': 0.9})
 
-LBL, TTL, CBLBL, CBTICK, NOTE = 30, 24, 26, 18, 17
+LBL, TTL, CBLBL, CBTICK, NOTE = 28, 28, 26, 18, 24
 
 ROOT = Path('/Users/suzuki/github/projects_cosmos')
 DATA = ROOT / 'csvfiles_star' / 'v02'
