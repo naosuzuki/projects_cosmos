@@ -71,8 +71,10 @@ def ref_radec(df: pd.DataFrame, ref_tag: str, fb_tag: str):
     return ra, dec
 
 
-def quiver_one(combo: str, cat: str) -> None:
+def quiver_one(combo: str, cat: str, vmax_override=None) -> None:
     m1, m2, ref_tag, fb_tag, baseline, vmax, scale = COMBOS[combo]
+    if vmax_override is not None:               # force a specific |mu| colour range
+        vmax = vmax_override
     df = pd.read_parquet(DATA / f'refined_{combo}_with_pm_v02.parquet')
     sel = category_mask(df, cat) & df['pmra'].notna() & df['pmdec'].notna()
     sub = df[sel].copy()
@@ -134,13 +136,16 @@ def quiver_one(combo: str, cat: str) -> None:
     print(f'  wrote {out.name}  (cat_cat {len(cc):,}, Gaia-supp {len(gs):,})')
 
 
-def main(combo: str = 'HST_JWST') -> None:
+def main(combo: str = 'HST_JWST', vmax_override=None) -> None:
     m1, m2, *_ = COMBOS[combo]
-    print(f'{m1}->{m2} PM quiver from refined_{combo}_with_pm_v02.parquet')
+    print(f'{m1}->{m2} PM quiver from refined_{combo}_with_pm_v02.parquet'
+          + (f'  (|mu| scale 0-{vmax_override:g})' if vmax_override else ''))
     for cat in CATEGORIES:
-        quiver_one(combo, cat)
+        quiver_one(combo, cat, vmax_override)
     print('Done.')
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else 'HST_JWST')
+    _combo = sys.argv[1] if len(sys.argv) > 1 else 'HST_JWST'
+    _vmax = float(sys.argv[2]) if len(sys.argv) > 2 else None
+    main(_combo, _vmax)
